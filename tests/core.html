@@ -1,0 +1,199 @@
+<!doctype html><meta charset="utf-8"><title>core tests</title>
+<script type="module">
+// اختبارات المنطق الأساسي على IndexedDB حقيقية داخل Chrome
+import * as db from '../src/core/db.js';
+import * as store from '../src/core/store.js';
+import * as ops from '../src/core/ops.js';
+import * as calc from '../src/core/calc.js';
+import * as an from '../src/core/analytics.js';
+import * as bk from '../src/core/backup.js';
+import { runMigrations } from '../src/core/migrate.js';
+import { todayKey, addDays, setClock } from '../src/core/util.js';
+
+const out = []; let pass = 0, fail = 0;
+const ok = (c, m) => { if (c) pass++; else { fail++; out.push('FAIL: ' + m); } };
+const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), `${m} — توقعنا ${JSON.stringify(b)} وجدنا ${JSON.stringify(a)}`);
+const near = (a, b, m) => ok(Math.abs(a - b) < 0.006, `${m} — توقعنا ${b} وجدنا ${a}`);
+const throws = async (f, m, code) => { try { await f(); fail++; out.push('FAIL: لم يُرمَ خطأ: ' + m); } catch (e) { if (code && e.code !== code) { fail++; out.push(`FAIL: ${m} — كود الخطأ ${e.code} بدل ${code} (${e.message})`); } else pass++; } };
+const section = s => out.push('— ' + s);
+
+try {
+  // ============ 1) ترحيل من localStorage القديم ============
+  section('الترحيل');
+  localStorage.setItem('sh_p', JSON.stringify([{ id: 'a1', bc: '6281000000011', name: 'حليب طازج', price: 2.5, u: 'pc' }, { id: 'a2', bc: '6281000000028', name: 'جبنة', price: 40, u: 'kg' }, { id: 'a3', bc: '6281000000011', name: 'مكرر', price: 1, u: 'pc' }]));
+  localStorage.setItem('sh_s', JSON.stringify([{ id: 'h1', t: '2026-10-30T10:00:00.000Z', items: [{ name: 'حليب', d: '2 × 2.5', total: 5 }], total: 5 }]));
+  localStorage.setItem('sh_t', JSON.stringify({ name: 'دكان الأمل', cur: 'ر.س', theme: 'dark', vib: 0, snd: 1, once: 1 }));
+  localStorage.setItem('sh_c', JSON.stringify([{ id: 'a2', g: 500 }, { id: 'a1', qty: 3 }]));
+  const NAME = 'kp-test-' + Math.random().toString(36).slice(2);
+  await db.open(NAME); await runMigrations(); await store.load();
+  eq(store.count('products'), 3, 'ترحيل 3 منتجات'); eq(store.get('products', 'a1').price, 2.5, 'سعر منتج قديم'); eq(store.get('products', 'a2').unit, 'kg', 'وحدة الكيلو');
+  eq(store.get('products', 'a3').barcode, '', 'باركود مكرر يُفرَّغ بدل أن يضيع المنتج');
+  eq(store.count('invoices'), 1, 'ترحيل فاتورة قديمة'); ok(store.list('invoices')[0].legacy === true, 'علامة legacy');
+  eq(store.settings().name, 'دكان الأمل', 'اسم المتجر'); eq(store.settings().cur, 'ر.س', 'العملة'); eq(store.settings().vib, 0, 'الاهتزاز');
+  ok(localStorage.getItem('sh_p') && localStorage.getItem('sh_s'), 'localStorage القديمة لم تُحذف');
+  ok((await db.get('meta', 'legacy_localstorage')).v.raw.sh_p, 'نسخة خام محفوظة');
+  const cart = JSON.parse(localStorage.getItem('kp_cart_' + NAME)); eq(cart.lines.find(l => l.pid === 'a2').qty, 0.5, 'سلة قديمة: 500 جم = 0.5 كجم');
+  await runMigrations(); await store.load(); eq(store.count('products'), 3, 'إعادة الترحيل لا تكرر');
+  ok(an.summary('2000-01-01', '2100-01-01').legacyCount === 1, 'الفواتير القديمة معلَّمة في الملخص');
+  eq(an.summary('2000-01-01', '2100-01-01').grossProfit, 0, 'لا ربح وهمي من فواتير قديمة بلا تكلفة');
+
+  // ============ 2) المنتجات ============
+  section('المنتجات');
+  const cat = await ops.saveCategory({ name: 'ألبان' });
+  const milk = await ops.saveProduct({ name: 'لبن 1ل', barcode: '111', price: 10, cost: 6, stock: 20, min: 5, cat: cat.id, expiry: addDays(todayKey(), 10) });
+  eq(milk.stock, 20, 'مخزون افتتاحي'); eq(store.list('moves').filter(m => m.pid === milk.id).length, 1, 'حركة افتتاحية');
+  await throws(() => ops.saveProduct({ name: 'x', barcode: '111', price: 1 }), 'باركود مكرر');
+  await throws(() => ops.saveProduct({ name: '', price: 1 }), 'اسم فارغ');
+  await throws(() => ops.saveProduct({ name: 'x', price: -1 }), 'سعر سالب');
+  await throws(() => ops.saveProduct({ name: 'x', price: 'abc' }), 'سعر غير رقمي');
+  const rice = await ops.saveProduct({ name: 'رز', barcode: '222', price: 8, cost: 5, unit: 'kg', stock: 50 });
+  const gum = await ops.saveProduct({ name: 'علكة', barcode: '333', price: 1, cost: 0.5, stock: 100 });
+  const unk = await ops.saveProduct({ name: 'بلا تكلفة', barcode: '444', price: 4, stock: 10 });
+  eq(store.byBarcode('٢٢٢')?.id ?? null, null, 'بحث بالأرقام العربية يتم تحويله عند الإدخال لا في الفهرس'); eq(store.byBarcode('222').id, rice.id, 'فهرس الباركود');
+  eq(store.searchProducts('لبن')[0].id, milk.id, 'بحث بالاسم'); eq(store.searchProducts('رُز')[0]?.id, rice.id, 'بحث يتجاهل التشكيل');
+
+  // ============ 3) العروض والحسابات ============
+  section('الحساب');
+  const ctx = () => ops.cartCtx();
+  let c = calc.calcCart({ lines: [{ pid: milk.id, qty: 3 }, { pid: rice.id, qty: 0.5 }] }, ctx());
+  near(c.subtotal, 34, 'مجموع السلة'); near(c.total, 34, 'الإجمالي بلا خصم');
+  c = calc.calcCart({ lines: [{ pid: milk.id, qty: 3, disc: { type: 'pct', value: 10 } }], invDisc: { type: 'fixed', value: 3 } }, ctx());
+  near(c.lineDisc, 3, 'خصم بند 10%'); near(c.invDisc, 3, 'خصم فاتورة'); near(c.total, 24, 'الإجمالي بعد الخصمين'); near(c.lines[0].net, 24, 'صافي البند بعد التوزيع');
+  const off = await ops.saveOffer({ pid: gum.id, type: 'bogo', buy: 1, get: 1 });
+  c = calc.calcCart({ lines: [{ pid: gum.id, qty: 5 }] }, ctx()); near(c.total, 3, 'اشترِ 1 واحصل على 1: 5 قطع = 3');
+  await ops.saveOffer({ id: off.id, pid: gum.id, type: 'pct', value: 20, end: addDays(todayKey(), -1) });
+  c = calc.calcCart({ lines: [{ pid: gum.id, qty: 5 }] }, ctx()); near(c.total, 5, 'العرض المنتهي لا يُطبَّق');
+  await ops.deleteOffer(off.id);
+  let ct = calc.calcCart({ lines: [{ pid: milk.id, qty: 1 }] }, { ...ctx(), tax: { on: true, rate: 15, inclusive: false } }); near(ct.tax, 1.5, 'ضريبة مضافة'); near(ct.total, 11.5, 'إجمالي بضريبة مضافة');
+  ct = calc.calcCart({ lines: [{ pid: milk.id, qty: 1 }] }, { ...ctx(), tax: { on: true, rate: 15, inclusive: true } }); near(ct.tax, 1.3, 'ضريبة شاملة'); near(ct.total, 10, 'إجمالي بضريبة شاملة');
+  await throws(async () => calc.settle(10, [{ method: 'cash', amount: 5 }]), 'دفع ناقص');
+  await throws(async () => calc.settle(10, [{ method: 'card', amount: 12 }]), 'بطاقة تتجاوز');
+  const st = calc.settle(34, [{ method: 'cash', amount: 50 }]); near(st.change, 16, 'الباقي'); const st2 = calc.settle(34, [{ method: 'card', amount: 14 }, { method: 'cash', amount: 30 }]); near(st2.change, 10, 'دفع مختلط: الباقي'); near(st2.cashNet, 20, 'دفع مختلط: النقد المطلوب');
+
+  // ============ 4) البيع ============
+  section('البيع');
+  const inv = await ops.completeSale({ cart: { lines: [{ pid: milk.id, qty: 3 }, { pid: rice.id, qty: 0.5 }] }, payments: [{ method: 'cash', amount: 50 }] });
+  eq(inv.no, 'INV-000001', 'رقم الفاتورة الأول'); near(inv.total, 34, 'إجمالي'); near(inv.change, 16, 'باقي'); near(inv.net, 34, 'صافي');
+  eq(store.get('products', milk.id).stock, 17, 'خصم المخزون (قطعة)'); eq(store.get('products', rice.id).stock, 49.5, 'خصم المخزون (وزن)');
+  ok(store.list('moves').some(m => m.type === 'sale' && m.pid === milk.id && m.qty === -3), 'حركة بيع مسجّلة');
+  const inv2 = await ops.completeSale({ cart: { lines: [{ pid: gum.id, qty: 2 }] }, payments: [{ method: 'card', amount: 2 }] }); eq(inv2.no, 'INV-000002', 'ترقيم متسلسل');
+  await throws(() => ops.completeSale({ cart: { lines: [{ pid: milk.id, qty: 100 }] }, payments: [{ method: 'cash', amount: 1000 }] }), 'مخزون غير كافٍ', 'STOCK');
+  eq(store.get('products', milk.id).stock, 17, 'فشل البيع لا يغيّر المخزون'); eq(store.count('invoices'), 3, 'فشل البيع لا ينشئ فاتورة');
+  await throws(() => ops.completeSale({ cart: { lines: [] }, payments: [] }), 'فاتورة فارغة');
+  await throws(() => ops.completeSale({ cart: { lines: [{ pid: milk.id, qty: 1 }] }, payments: [{ method: 'credit', amount: 10 }] }), 'آجل بلا زبون', 'NEED_CUSTOMER');
+  const cust = await ops.saveCustomer({ name: 'أبو أحمد', phone: '050', creditLimit: 100 });
+  const inv3 = await ops.completeSale({ cart: { lines: [{ pid: milk.id, qty: 2 }] }, payments: [{ method: 'cash', amount: 5 }, { method: 'credit', amount: 15 }], customerId: cust.id });
+  near(inv3.due, 15, 'دين على الفاتورة'); eq(inv3.method, 'mixed', 'طريقة مختلطة'); near(store.customerBalance(cust.id), 15, 'رصيد الزبون');
+  await throws(() => ops.completeSale({ cart: { lines: [{ pid: milk.id, qty: 10 }] }, payments: [{ method: 'credit', amount: 100 }], customerId: cust.id }), 'تجاوز سقف الدين');
+  const inv4 = await ops.completeSale({ cart: { lines: [{ pid: unk.id, qty: 1 }] }, payments: [{ method: 'cash', amount: 4 }] });
+  // بيع مع خصم ضمن الحد وضريبة
+  await ops.saveSettings({ tax: { on: true, rate: 15, inclusive: false } });
+  const invT = await ops.completeSale({ cart: { lines: [{ pid: milk.id, qty: 1, disc: { type: 'pct', value: 10 } }] }, payments: [{ method: 'cash', amount: 20 }] });
+  near(invT.taxable, 9, 'قبل الضريبة'); near(invT.tax, 1.35, 'الضريبة'); near(invT.total, 10.35, 'الإجمالي بالضريبة'); near(invT.net, 9, 'الصافي بدون ضريبة');
+  await ops.saveSettings({ tax: { on: false } });
+
+  // ============ 4ب) الصلاحيات بدور الكاشير ============
+  section('الصلاحيات');
+  const auth = await import('../src/core/auth.js');
+  const smp = await ops.saveProduct({ name: 'عينة', barcode: '555', price: 10, cost: 4, stock: 5 });
+  await ops.saveUser({ name: 'المدير', role: 'manager', pin: '9999' }); const cu = await ops.saveUser({ name: 'سعاد', role: 'cashier', pin: '1234' });
+  await ops.saveSettings({ auth: { enabled: true } }); await throws(() => auth.login(cu.id, '0000'), 'PIN خاطئ'); await auth.login(cu.id, '١٢٣٤'.replace(/./g, c => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(c)]));
+  eq(auth.current().role, 'cashier', 'دخول الكاشير');
+  await throws(() => ops.completeSale({ cart: { lines: [{ pid: smp.id, qty: 1, disc: { type: 'pct', value: 50 } }] }, payments: [{ method: 'cash', amount: 10 }] }), 'خصم كبير يحتاج موافقة المدير', 'NEED_APPROVAL');
+  eq(store.get('products', smp.id).stock, 5, 'لا مخزون مخصوم بعد الرفض');
+  const appr = await auth.findApprover('pos.bigDiscount', '9999'); ok(appr && appr.role === 'manager', 'PIN المدير يوافق'); ok(!(await auth.findApprover('pos.bigDiscount', '1234')), 'PIN الكاشير لا يوافق');
+  const invA = await ops.completeSale({ cart: { lines: [{ pid: smp.id, qty: 1, disc: { type: 'pct', value: 50 } }] }, payments: [{ method: 'cash', amount: 10 }], approvedBy: appr }); near(invA.total, 5, 'بيع بخصم موافَق عليه'); eq(invA.userName, 'سعاد', 'اسم الموظف على الفاتورة'); eq(invA.approvedBy, 'المدير', 'اسم الموافِق');
+  const invS = await ops.completeSale({ cart: { lines: [{ pid: smp.id, qty: 1, disc: { type: 'pct', value: 5 } }] }, payments: [{ method: 'cash', amount: 10 }] }); near(invS.total, 9.5, 'خصم ضمن الحد بلا موافقة');
+  await throws(() => ops.voidInvoice(invS.id, 'x'), 'الكاشير لا يلغي فاتورة', 'NO_PERM'); await throws(() => ops.deleteProduct(smp.id), 'الكاشير لا يحذف منتجاً', 'NO_PERM'); await throws(() => ops.saveExpense({ category: 'rent', amount: 1 }), 'الكاشير لا يسجل مصروفاً', 'NO_PERM');
+  await throws(() => ops.saveUser({ name: 'س', role: 'cashier', pin: '1111' }), 'الكاشير لا يدير الموظفين', 'NO_PERM');
+  ok(store.list('audit').some(a => a.action === 'sale.create' && a.userName === 'سعاد'), 'سجل العمليات يحمل اسم الموظف');
+  auth.logout(); const mu = store.list('users').find(u => u.role === 'manager'); await auth.login(mu.id, '9999'); await ops.voidInvoice(invS.id, 'اختبار'); eq(store.get('invoices', invS.id).status, 'void', 'المدير يلغي'); await ops.voidInvoice(invA.id, 'اختبار');
+  await throws(() => ops.saveUser({ id: mu.id, name: 'المدير', role: 'cashier' }), 'لا يمكن إزالة آخر مدير');
+  await ops.saveSettings({ auth: { enabled: false } }); auth.logout(); eq(auth.current().id, 'owner', 'عند إيقاف الدخول يعمل التطبيق كالسابق');
+
+  // ============ 5) المرتجعات ============
+  section('المرتجعات');
+  const r1 = await ops.createReturn({ invoiceId: inv.id, items: [{ idx: 0, qty: 1, condition: 'good' }], reason: 'تغيير رأي الزبون' });
+  near(r1.refund, 10, 'مبلغ الاسترداد'); eq(store.get('products', milk.id).stock, 15, 'مخزون بعد مرتجع صالح (17-2-1+1)');
+  await throws(() => ops.createReturn({ invoiceId: inv.id, items: [{ idx: 0, qty: 5, condition: 'good' }], reason: 'x' }), 'مرتجع أكبر من المباع');
+  const r2 = await ops.createReturn({ invoiceId: inv.id, items: [{ idx: 0, qty: 1, condition: 'damaged' }], reason: 'تالف' });
+  eq(store.get('products', milk.id).stock, 15, 'مرتجع تالف لا يعود للمخزون'); near(r2.restockCost, 0, 'تكلفة المرتجع التالف لا تُسترد');
+  const r3 = await ops.createReturn({ invoiceId: inv3.id, items: [{ idx: 0, qty: 1, condition: 'good' }], reason: 'تغيير' }); near(r3.debtCut, 10, 'المرتجع يخفض دين الفاتورة أولاً'); near(r3.cashOut, 0, 'لا نقد خارج'); near(store.customerBalance(cust.id), 5, 'رصيد بعد المرتجع');
+  await throws(() => ops.voidInvoice(inv.id, 'x'), 'لا إلغاء لفاتورة عليها مرتجع');
+
+  // ============ 6) إلغاء ============
+  section('الإلغاء');
+  const before = store.get('products', gum.id).stock; await ops.voidInvoice(inv2.id, 'خطأ كاشير');
+  eq(store.get('products', gum.id).stock, before + 2, 'الإلغاء يعيد المخزون'); eq(store.get('invoices', inv2.id).status, 'void', 'حالة ملغاة');
+  await throws(() => ops.voidInvoice(inv2.id, 'مرة أخرى'), 'إلغاء مكرر'); await throws(() => ops.voidInvoice(inv4.id, ''), 'إلغاء بلا سبب');
+
+  // ============ 7) المشتريات والموردون ============
+  section('المشتريات');
+  const sup = await ops.saveSupplier({ name: 'شركة الأمل', phone: '011' });
+  await throws(() => ops.saveSupplier({ name: 'شركة الأمل' }), 'مورد مكرر');
+  const bExp = addDays(todayKey(), 5);
+  const pur = await ops.savePurchase({ supplierId: sup.id, status: 'approved', items: [{ pid: milk.id, qty: 10, cost: 7, expiry: bExp }, { pid: unk.id, qty: 5, cost: 2 }], discount: 5, paid: 30, method: 'cash', enableTrack: true });
+  eq(pur.no, 'PUR-000001', 'رقم فاتورة الشراء'); near(pur.total, 75, 'إجمالي الشراء (70+10-5)'); near(pur.due, 45, 'المتبقي');
+  eq(store.get('products', milk.id).stock, 26, 'المخزون بعد الشراء (16+10)'); near(store.get('products', milk.id).cost, 7, 'سعر الشراء يتحدث (آخر سعر)');
+  ok(store.list('batches').some(b => b.pid === milk.id && b.expiry === bExp && b.qty === 10), 'دفعة صلاحية');
+  near(store.supplierBalance(sup.id), 45, 'مستحق المورد');
+  await ops.paySupplier(sup.id, 14, 'cash', 'دفعة جزئية'); near(store.supplierBalance(sup.id), 31, 'بعد دفعة جزئية');
+  await throws(() => ops.paySupplier(sup.id, 500), 'دفع أكثر من المستحق');
+  const draft = await ops.savePurchase({ supplierId: sup.id, status: 'draft', items: [{ pid: gum.id, qty: 10, cost: 0.4 }] }); eq(draft.status, 'draft', 'مسودة'); eq(store.get('products', gum.id).stock, 100, 'المسودة لا تغير المخزون');
+  const ap = await ops.approvePurchase(draft.id, { paid: 0 }); eq(ap.status, 'approved', 'اعتماد مسودة'); eq(store.get('products', gum.id).stock, 110, 'المخزون بعد اعتماد المسودة');
+  await throws(() => ops.savePurchase({ id: draft.id, supplierId: sup.id, items: [{ pid: gum.id, qty: 1, cost: 1 }] }), 'تعديل فاتورة معتمدة');
+
+  // ============ 8) FEFO ============
+  section('الصلاحية FEFO');
+  const m0 = store.get('products', milk.id); // الدفعة الوحيدة 10 تنتهي بعد 5 أيام
+  await ops.completeSale({ cart: { lines: [{ pid: milk.id, qty: 4 }] }, payments: [{ method: 'cash', amount: 100 }] });
+  ok(store.list('batches').find(b => b.pid === milk.id && b.expiry === bExp).qty <= 10, 'الدفعات تنقص من الأقرب انتهاءً');
+  const ex = an.expiryList(30); ok(ex.some(x => x.pid === milk.id && x.status === 'soon'), 'قائمة قريبة الانتهاء');
+
+  // ============ 9) الجرد والتعديل ============
+  section('المخزون');
+  await ops.adjustStock({ pid: rice.id, mode: 'sub', qty: 2, reason: 'تالف' }); eq(store.get('products', rice.id).stock, 47.5, 'خصم يدوي');
+  await throws(() => ops.adjustStock({ pid: rice.id, mode: 'sub', qty: 1000, reason: 'x' }), 'خصم أكبر من المتوفر');
+  await throws(() => ops.adjustStock({ pid: rice.id, mode: 'sub', qty: 1, reason: '' }), 'تعديل بلا سبب');
+  const cnt = await ops.stockCount([{ pid: rice.id, counted: 45 }, { pid: gum.id, counted: 110 }], 'جرد شهري'); eq(cnt.items.find(i => i.pid === rice.id).diff, -2.5, 'فرق الجرد'); eq(store.get('products', rice.id).stock, 45, 'الجرد يضبط الكمية');
+  await ops.adjustStock({ pid: 'a1', mode: 'set', qty: 30, reason: 'افتتاحي', enableTrack: true }); eq(store.get('products', 'a1').track, true, 'تفعيل التتبع للمنتج القديم'); eq(store.get('products', 'a1').stock, 30, 'كمية افتتاحية');
+  await throws(() => ops.adjustStock({ pid: 'a2', mode: 'add', qty: 1 }), 'منتج غير متتبع', 'UNTRACKED');
+  await throws(() => ops.deleteProduct(milk.id), 'منع حذف منتج له عمليات', 'IN_USE'); await ops.archiveProduct(milk.id); ok(store.get('products', milk.id).active === false, 'أرشفة'); await ops.archiveProduct(milk.id, false);
+  const tmp = await ops.saveProduct({ name: 'مؤقت', price: 1 }); await ops.deleteProduct(tmp.id); ok(!store.get('products', tmp.id), 'حذف منتج بلا عمليات');
+
+  // ============ 10) الأرباح ============
+  section('الأرباح');
+  const t = todayKey(); const s = an.summary(t, t);
+  ok(s.grossProfit < s.revenueNet, 'الربح أقل من الإيرادات'); ok(s.sales > s.grossProfit, 'المبيعات ≠ الربح'); ok(s.unknownCostLines >= 1, 'تنبيه بنود بلا تكلفة');
+  // ربح فاتورة واحدة يدوياً: inv = 3×10 + 0.5×8 = 34 ، تكلفة 3×6 + 0.5×5 = 20.5 → 13.5
+  near(calc.invoiceProfit(store.get('invoices', inv.id)), 13.5, 'ربح الفاتورة الأولى');
+  await ops.saveExpense({ category: 'rent', amount: 7, note: 'اختبار' }); const s2 = an.summary(t, t); near(s2.expenses, 7, 'المصروفات'); near(s2.netProfit, s2.grossProfit - 7, 'صافي الربح = الإجمالي − المصروفات');
+  const inv_ = an.inventory(); ok(inv_.costValue > 0, 'قيمة المخزون بالتكلفة'); const ser = an.series(addDays(t, -6), t, 'day'); eq(ser.length, 7, 'سلسلة 7 أيام');
+
+  // ============ 11) الدفعات والورديات ============
+  section('الديون والورديات');
+  const pc = await ops.payCustomer(cust.id, 5, 'cash', 'سداد'); near(store.customerBalance(cust.id), 0, 'سداد دين الزبون'); await throws(() => ops.payCustomer(cust.id, 1), 'سداد أكثر من الدين');
+  const sh = await ops.openShift(100); await throws(() => ops.openShift(0), 'وردية مفتوحة مسبقاً');
+  await ops.completeSale({ cart: { lines: [{ pid: gum.id, qty: 10 }] }, payments: [{ method: 'cash', amount: 10 }] });
+  await ops.saveExpense({ category: 'other', amount: 3, method: 'cash' });
+  const sm = an.shiftSummary(store.get('shifts', sh.id)); near(sm.expectedCash, 100 + 10 - 3, 'النقدية المتوقعة = البداية + مبيعات − مصروفات');
+  const cl = await ops.closeShift(sh.id, 105, 'اختبار', sm); near(cl.diff, -2, 'فرق الوردية'); eq(cl.status, 'closed', 'إغلاق الوردية');
+
+  // ============ 12) نسخ احتياطي ============
+  section('النسخ الاحتياطي');
+  const b = await bk.buildBackup(); ok((await bk.validateBackup(b)).ok, 'نسخة سليمة تُقبل');
+  const bad = structuredClone(b); bad.data.products[0].price = 999; ok(!(await bk.validateBackup(bad)).ok, 'نسخة معدّلة تُرفض (بصمة)');
+  ok(!(await bk.validateBackup({ foo: 1 })).ok, 'ملف غريب يُرفض'); ok(!(await bk.validateBackup({ app: 'kashier-pro', schema: 1, data: { products: 'x' } })).ok, 'بنية خاطئة تُرفض');
+  const legacy = await bk.validateBackup({ P: [{ name: 'a', price: 1 }], H: [], T: {} }); ok(legacy.ok && legacy.kind === 'legacy', 'نسخة التطبيق القديم مقبولة');
+  const nProd = store.count('products'), nInv = store.count('invoices'), invNo = store.get('invoices', inv.id).no;
+  await ops.saveProduct({ name: 'سيُمسح بالاستعادة', price: 1 });
+  await bk.restoreBackup(JSON.parse(JSON.stringify(b)));
+  eq(store.count('products'), nProd, 'الاستعادة تعيد المنتجات'); eq(store.count('invoices'), nInv, 'الاستعادة تعيد الفواتير'); eq(store.get('invoices', inv.id).no, invNo, 'أرقام الفواتير محفوظة');
+  const next = await ops.completeSale({ cart: { lines: [{ pid: gum.id, qty: 1 }] }, payments: [{ method: 'cash', amount: 1 }] }); ok(parseInt(next.no.slice(4)) > 4, 'العداد يكمل بعد الاستعادة بلا تكرار');
+  ok((await bk.listSnapshots()).some(x => x.label === 'قبل الاستعادة'), 'لقطة أمان قبل الاستعادة');
+  await bk.restoreBackup({ P: [{ id: 'z1', bc: '9', name: 'قديم', price: 3, u: 'pc' }], H: [], T: {} }); eq(store.count('products'), 1, 'استيراد نسخة قديمة بصيغة {P,H,T}');
+
+  await db.deleteDatabase(NAME);
+} catch (e) { fail++; out.push('EXCEPTION: ' + (e.stack || e.message)); }
+window.__result = { pass, fail, out }; window.__done = true;
+</script>
