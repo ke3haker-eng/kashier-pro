@@ -1,0 +1,10 @@
+# بيانات الخادم المحلي (تحوي مفتاح الوصول!) — لا ترفعها أبداً
+data/
+node_modules/
+dist/
+_site/
+*.log
+.env
+.env.*
+.DS_Store
+*.zip

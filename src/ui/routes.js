@@ -9,6 +9,7 @@ export const ROUTES = [
   { id: 'suppliers', label: 'الموردون', icon: 'truck', perm: 'purchases.manage', load: () => import('../pages/suppliers.js') },
   { id: 'customers', label: 'الزبائن', icon: 'users', perm: 'customers.view', load: () => import('../pages/customers.js') },
   { id: 'invoices', label: 'الفواتير', icon: 'receipt', perm: 'invoices.view', load: () => import('../pages/invoices.js') },
+  { id: 'orders', label: 'الطلبات والمحادثات', icon: 'chat', perm: 'pos.sell', load: () => import('../pages/orders.js') },
   { id: 'returns', label: 'المرتجعات', icon: 'undo', perm: 'returns.create', altPerm: 'invoices.view', load: () => import('../pages/returns.js') },
   { id: 'expenses', label: 'المصروفات', icon: 'wallet', perm: 'expenses.manage', load: () => import('../pages/expenses.js') },
   { id: 'reports', label: 'التقارير', icon: 'chart', perm: 'reports.view', load: () => import('../pages/reports.js') },

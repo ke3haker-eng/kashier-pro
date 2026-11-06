@@ -4,7 +4,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const shots = process.env.SHOTS || '/tmp/claude-0/shots';
 const w = +process.env.W || 1366, h = +process.env.H || 800, mobile = !!process.env.MOBILE;
 const p = await launch({ width: w, height: h, mobile });
-const ROUTES = ['home', 'pos', 'products', 'inventory', 'purchases', 'suppliers', 'customers', 'invoices', 'returns', 'expenses', 'reports', 'staff', 'settings'];
+const ROUTES = ['home', 'pos', 'products', 'inventory', 'purchases', 'suppliers', 'customers', 'invoices', 'orders', 'returns', 'expenses', 'reports', 'staff', 'settings'];
 let bad = 0;
 try {
   await p.goto('/index.html'); await p.eval(`localStorage.setItem('kp_mode','demo')`);

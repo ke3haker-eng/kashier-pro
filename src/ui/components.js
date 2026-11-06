@@ -15,7 +15,7 @@ export const mny = n => html`<span class="num">${money(n)}</span>`;
 // ---------- عناصر جاهزة ----------
 export const badge = (text, kind = '') => html`<span class="badge ${kind}">${text}</span>`;
 export const emptyState = (ic, text, action = '') => html`<div class="empty">${icon(ic, 44)}<div>${text}</div>${action ? html`<div style="margin-top:8px">${action}</div>` : ''}</div>`;
-export const pageHead = (title, actions = '', sub = '') => html`<div class="page-h"><div><h2>${title}</h2>${sub ? html`<div class="sub">${sub}</div>` : ''}</div><div class="row wrap">${actions}</div></div>`;
+export const pageHead = (title, actions = '', sub = '') => html`<div class="page-h"><div><h2>${title}</h2>${sub ? html`<div class="sub">${sub}</div>` : ''}</div><div class="row wrap acts">${actions}</div></div>`;
 // tone: y (أصفر) b (أزرق) p (بنفسجي) o (برتقالي) g (أخضر) r (أحمر) plain
 export const statCard = ({ label, value, icon: ic = 'dollar', tone = 'plain', sub = '', subKind = '' }) => html`<div class="stat ${tone}"><div class="ico">${icon(ic, 24)}</div><div class="grow"><div class="lb">${label}</div><div class="vl">${value}</div>${sub ? html`<div class="sb ${subKind}">${sub}</div>` : ''}</div></div>`;
 export const seg = (items, value, attr = 'data-seg') => html`<div class="seg">${items.map(([v, l]) => html`<button type="button" ${raw(attr)}="${v}" class="${v === value ? 'on' : ''}">${l}</button>`)}</div>`;
@@ -50,7 +50,8 @@ export function bindActs(root, acts) { delegate(root, 'click', '[data-act]', (e,
 // cols: [{key,label,render?(row,i)=>html,align:'end'|'center',cls,sort:true}]  — rows: مصفوفة كائنات. rowAttr(row) => نص سمات إضافية (مثل data-id)
 export function table({ cols, rows, empty = 'لا توجد بيانات', stack = true, rowAttr, foot, sortKey, sortDir, attrSort = 'data-sort' }) {
   if (!rows.length) return emptyState('list', empty);
-  return html`<div class="tbl-wrap"><table class="tbl ${stack ? 'stack' : ''}"><thead><tr>${cols.map(c => html`<th class="${c.align || ''} ${c.sort ? 'sortable' : ''}" ${c.sort ? raw(`${attrSort}="${esc(c.key)}"`) : ''}>${c.label}${c.sort && sortKey === c.key ? raw(sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`)}</tr></thead><tbody>${rows.map((r, i) => html`<tr ${rowAttr ? raw(rowAttr(r, i) || '') : ''}>${cols.map(c => html`<td class="${c.align || ''} ${c.cls || ''}" data-l="${c.label}">${c.render ? c.render(r, i) : (r[c.key] ?? '')}</td>`)}</tr>`)}</tbody>${foot ? html`<tfoot>${foot}</tfoot>` : ''}</table></div>`;
+  const ti = cols.findIndex(c => c.label && !/nolabel/.test(c.cls || '') && c.label !== '#');   // عمود العنوان في بطاقة الجوال
+  return html`<div class="tbl-wrap"><table class="tbl ${stack ? 'stack' : ''}"><thead><tr>${cols.map(c => html`<th class="${c.align || ''} ${c.sort ? 'sortable' : ''}" ${c.sort ? raw(`${attrSort}="${esc(c.key)}"`) : ''}>${c.label}${c.sort && sortKey === c.key ? raw(sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`)}</tr></thead><tbody>${rows.map((r, i) => html`<tr ${rowAttr ? raw(rowAttr(r, i) || '') : ''}>${cols.map(c => html`<td class="${c.align || ''} ${c.cls || ''} ${cols.indexOf(c) === ti ? 't' : ''}" data-l="${c.label}">${c.render ? c.render(r, i) : (r[c.key] ?? '')}</td>`)}</tr>`)}</tbody>${foot ? html`<tfoot>${foot}</tfoot>` : ''}</table></div>`;
 }
 export const paginate = (arr, page = 1, size = 25) => ({ items: arr.slice((page - 1) * size, page * size), page, pages: Math.max(1, Math.ceil(arr.length / size)), total: arr.length });
 export function pager({ page, pages }, attr = 'data-page') {

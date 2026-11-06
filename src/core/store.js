@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS = {
   tax: { on: false, rate: 15, inclusive: true, label: 'ضريبة القيمة المضافة' },
   invoice: { prefix: 'INV-', pad: 6, footer: 'شكراً لزيارتكم', showLogo: true, paper: '80', autoPrint: false, copies: 1, retPrefix: 'RET-', purPrefix: 'PUR-' },
   stock: { allowNegative: false, lowDefault: 5, expiryDays: 30 },
+  store: { title: '', about: '', whatsapp: '', phone: '', hours: '', notice: '', delivery: { pickup: true, home: true, fee: 0, free_over: 0, min: 0, areas: '' }, pay: { cash: true, transfer: true, instructions: '' } },
   pos: { requireShift: false, maxDiscPct: 10, defaultPay: 'cash', grid: true, images: true, scale: { on: false, prefix: '2', itemLen: 5, valLen: 5 } },
   cost: { method: 'last' },
   backup: { auto: true, keep: 7, intervalH: 24, lastAt: 0, lastExportAt: 0 },
@@ -19,6 +20,16 @@ export const DEFAULT_SETTINGS = {
   sync: { enabled: false, url: '', key: '' },
   demo: false,
 };
+
+// تفضيلات خاصة بكل جهاز (المظهر والاهتزاز والصوت...): في الوضع السحابي لا تُشارَك بين الأجهزة بل تُحفظ في الجهاز نفسه
+export const DEV_KEYS = ['theme', 'vib', 'snd', 'once'];
+export const devPrefs = () => { try { const o = JSON.parse(localStorage.getItem('kp_devprefs') || '{}'); return Object.fromEntries(DEV_KEYS.filter(k => k in o).map(k => [k, o[k]])); } catch { return {}; } };
+const ovl = s => (db.isRemote() ? { ...s, ...devPrefs() } : s);
+export function setDevPrefs(patch) {
+  const o = { ...devPrefs(), ...Object.fromEntries(Object.entries(patch).filter(([k]) => DEV_KEYS.includes(k))) };
+  try { localStorage.setItem('kp_devprefs', JSON.stringify(o)); } catch { }
+  state.settings = ovl(state.settings); emit(new Set(['meta']));
+}
 
 const state = { m: {}, settings: structuredClone(DEFAULT_SETTINGS), counters: {}, loaded: false };
 export const S = state;
@@ -49,7 +60,7 @@ export async function load() {
   for (const n of NAMES) { state.m[n] = new Map((await db.getAll(n)).map(r => [r.id, r])); lists[n] = null; }
   const metas = await db.getAll('meta');
   const mm = Object.fromEntries(metas.map(r => [r.k, r.v]));
-  state.settings = deepMerge(structuredClone(DEFAULT_SETTINGS), mm.settings || {});
+  state.settings = ovl(deepMerge(structuredClone(DEFAULT_SETTINGS), mm.settings || {}));
   state.counters = mm.counters || {};
   state.meta = mm;
   reindexAll();
@@ -58,7 +69,7 @@ export async function load() {
 
 async function reload(names) {
   for (const n of names) {
-    if (n === 'meta') { const metas = await db.getAll('meta'); const mm = Object.fromEntries(metas.map(r => [r.k, r.v])); state.settings = deepMerge(structuredClone(DEFAULT_SETTINGS), mm.settings || {}); state.counters = mm.counters || {}; state.meta = mm; continue; }
+    if (n === 'meta') { const metas = await db.getAll('meta'); const mm = Object.fromEntries(metas.map(r => [r.k, r.v])); state.settings = ovl(deepMerge(structuredClone(DEFAULT_SETTINGS), mm.settings || {})); state.counters = mm.counters || {}; state.meta = mm; continue; }
     if (!state.m[n]) continue;
     state.m[n] = new Map((await db.getAll(n)).map(r => [r.id, r])); lists[n] = null;
   }
@@ -71,7 +82,7 @@ db.onCommit(async (ch, remote) => {
   const touched = new Set();
   for (const [n, recs] of Object.entries(ch.put || {})) {
     touched.add(n);
-    if (n === 'meta') { for (const r of recs) { state.meta ||= {}; state.meta[r.k] = r.v; if (r.k === 'settings') state.settings = deepMerge(structuredClone(DEFAULT_SETTINGS), r.v); if (r.k === 'counters') state.counters = r.v; } continue; }
+    if (n === 'meta') { for (const r of recs) { state.meta ||= {}; state.meta[r.k] = r.v; if (r.k === 'settings') state.settings = ovl(deepMerge(structuredClone(DEFAULT_SETTINGS), r.v)); if (r.k === 'counters') state.counters = r.v; } continue; }
     const m = state.m[n]; if (!m) continue;
     for (const r of recs) { if (n === 'products') { const o = m.get(r.id); if (o) unindexProduct(o); indexProduct(r); } m.set(r.id, r); }
     lists[n] = null;

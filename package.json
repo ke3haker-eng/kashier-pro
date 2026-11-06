@@ -1,12 +1,12 @@
 {
   "name": "kashier-pro",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "description": "كاشير الدكان — نظام نقاط بيع وإدارة سوبر ماركت (PWA بلا خطوات بناء)",
   "scripts": {
     "build": "node scripts/build.mjs",
     "start": "node server/server.mjs",
-    "test": "node tests/run-core.mjs && node tests/run-ui.mjs && node tests/run-server.mjs && node tests/run-files.mjs"
+    "test": "node tests/run-core.mjs && node tests/run-ui.mjs && node tests/run-server.mjs && node tests/run-files.mjs && node tests/run-sql.mjs && node tests/run-cloud.mjs && node tests/run-store.mjs"
   }
 }

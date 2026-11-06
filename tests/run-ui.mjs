@@ -56,6 +56,7 @@ try {
   await T(0, 'أول تشغيل: قاعدة فارغة بلا بيانات وهمية', async () => {
     const c = await ev(`({prod:K.store.count('products'),inv:K.store.count('invoices'),cust:K.store.count('customers'),demo:K.store.settings().demo,mode:localStorage.getItem('kp_mode')})`);
     eq([c.prod, c.inv, c.cust, !!c.demo, c.mode], [0, 0, 0, false, null], 'يجب ألا توجد بيانات');
+    await p.waitFor(`/ابدأ|لا توجد|التجربة|فارغ/.test(document.getElementById('view')?.innerText||'')`, 8000).catch(() => { });   // الصفحة تُحمَّل كسولاً بعد ظهور الإطار
     const txt = await ev(`document.getElementById('view').innerText`); assert(/ابدأ|لا توجد|التجربة|فارغ/.test(txt), 'الصفحة الرئيسية لا تعرض حالة البداية: ' + txt.slice(0, 80));
     await p.shot(`${SHOTS}/ui-00-empty-home.png`); return 'لا منتجات ولا فواتير، ووضع التجربة غير مفعّل';
   }, p);
@@ -348,21 +349,21 @@ try {
   let beforeUpd;
   await T(15, 'تحديث التطبيق (إصدار Service Worker جديد) دون فقدان أي بيانات', async () => {
     await go('home'); await p.waitFor(`navigator.serviceWorker.controller`, 20000);
-    const reg = await ev(`(async()=>{const r=await navigator.serviceWorker.getRegistration();return {active:!!r.active,keys:await caches.keys()}})()`); assert(reg.active && reg.keys.some(k => k === 'kp-2.0.0'), 'SW الإصدار الأول غير مفعّل: ' + JSON.stringify(reg));
+    const reg = await ev(`(async()=>{const r=await navigator.serviceWorker.getRegistration();return {active:!!r.active,keys:await caches.keys()}})()`); assert(reg.active && reg.keys.some(k => k === 'kp-2.2.0'), 'SW الإصدار الأول غير مفعّل: ' + JSON.stringify(reg));
     beforeUpd = await ev(`Object.fromEntries(K.db.DATA_STORES.map(n=>[n,K.store.count(n)==null?0:K.store.count(n)]))`).catch(() => null);
     beforeUpd = await ev(`(async()=>Object.fromEntries(await Promise.all(K.db.DATA_STORES.map(async n=>[n,(await K.db.getAll(n)).length]))))()`);
     const sum0 = await ev(`(async()=>JSON.stringify((await K.db.getAll('products')).map(p=>[p.id,p.stock,p.price,p.cost]).sort())+JSON.stringify((await K.db.getAll('invoices')).map(i=>[i.id,i.total]).sort()))()`);
     // نصدر نسخة جديدة: نغيّر VERSION في sw.js (كما يفعل scripts/build.mjs)
-    const swp = path.join(ROOT, 'sw.js'); fs.writeFileSync(swp, fs.readFileSync(swp, 'utf8').replace("'kp-2.0.0'", "'kp-2.0.1'"));
+    const swp = path.join(ROOT, 'sw.js'); fs.writeFileSync(swp, fs.readFileSync(swp, 'utf8').replace("'kp-2.2.0'", "'kp-2.2.1'"));
     await ev(`navigator.serviceWorker.getRegistration().then(r=>r.update())`);
-    await p.waitFor(`caches.keys().then(k=>k.includes('kp-2.0.1')&&!k.includes('kp-2.0.0'))`, 25000);
+    await p.waitFor(`caches.keys().then(k=>k.includes('kp-2.2.1')&&!k.includes('kp-2.2.0'))`, 25000);
     await sleep(2500); // إعادة التحميل التلقائية بعد controllerchange
     await p.waitFor(`document.querySelector('.app')`, 20000); await p.eval(KINIT);
-    const keys = await ev(`caches.keys()`); assert(!keys.includes('kp-2.0.0') && keys.includes('kp-2.0.1'), 'الكاش القديم لم يُحذف: ' + keys);
+    const keys = await ev(`caches.keys()`); assert(!keys.includes('kp-2.2.0') && keys.includes('kp-2.2.1'), 'الكاش القديم لم يُحذف: ' + keys);
     const after = await ev(`(async()=>Object.fromEntries(await Promise.all(K.db.DATA_STORES.map(async n=>[n,(await K.db.getAll(n)).length]))))()`); eq(after, beforeUpd, 'عدد السجلات بعد التحديث');
     const sum1 = await ev(`(async()=>JSON.stringify((await K.db.getAll('products')).map(p=>[p.id,p.stock,p.price,p.cost]).sort())+JSON.stringify((await K.db.getAll('invoices')).map(i=>[i.id,i.total]).sort()))()`); eq(sum1, sum0, 'محتوى المنتجات والفواتير');
-    const pre = await ev(`(async()=>{const c=await caches.open('kp-2.0.1');return (await c.keys()).length})()`); assert(pre > 40, 'الكاش المسبق للإصدار الجديد ناقص: ' + pre);
-    return `kp-2.0.0 → kp-2.0.1: حُذف الكاش القديم، ${pre} ملفاً في الكاش الجديد، وكل السجلات والأرصدة كما هي`;
+    const pre = await ev(`(async()=>{const c=await caches.open('kp-2.2.1');return (await c.keys()).length})()`); assert(pre > 40, 'الكاش المسبق للإصدار الجديد ناقص: ' + pre);
+    return `kp-2.2.0 → kp-2.2.1: حُذف الكاش القديم، ${pre} ملفاً في الكاش الجديد، وكل السجلات والأرصدة كما هي`;
   }, p);
 
   // ---- 16) العمل دون إنترنت ----

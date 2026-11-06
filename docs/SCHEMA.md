@@ -85,3 +85,19 @@ data/
 كل ما عدا `health` يتطلب الترويسة `Authorization: Bearer <المفتاح>`. بعد 10 محاولات بمفتاح خاطئ يُحجب العنوان 10 دقائق. يُحتفَظ بآخر `KASHIER_KEEP` نسخة (الافتراضي 30).
 
 > هذا **نسخ احتياطي/استعادة** لنسخة كاملة، وليس مزامنة لحظية بين أجهزة ولا قاعدة بيانات مركزية. للمزامنة اللحظية متعددة الأجهزة تحتاج خادم قاعدة بيانات حقيقياً (غير مضمَّن) — انظر README.
+
+## جداول المتجر الإلكتروني (Supabase فقط)
+
+تُنشأ مع `supabase/schema.sql` ولا علاقة لها بـ IndexedDB. كلها مقفلة بالكامل (RLS بلا سياسات + سحب الصلاحيات)؛ الوصول عبر دوال `kp_*` فقط.
+
+| الجدول | المحتوى |
+|---|---|
+| `kp_shops` (أعمدة جديدة) | `slug` (رابط المتجر، فريد)، `store_on` (منشور؟)، `order_seq` (عدّاد أرقام الطلبات لكل متجر) |
+| `kp_orders` | `no`, `buyer` (sha256 لمفتاح المشتري), `name, phone, address, note`, `delivery` (pickup/home), `pay` (cash/transfer), `items[{id,name,unit,qty,price,total}]`, `subtotal, fee, total` (تُحسب على الخادم), `proof` (صورة الإشعار Base64), `status` (new/confirmed/preparing/ready/done/rejected/cancelled), `shop_note`, `hold_id` |
+| `kp_threads` | محادثة لكل مشترٍ: `buyer, name, phone, last_at, last_text, unread_shop, unread_buyer` |
+| `kp_msgs` | الرسائل: `sender` (buyer/shop), `kind` (text/system), `body`, `img`, `order_no` |
+
+إعدادات المتجر النصية (العنوان، واتساب، رسوم التوصيل…) تُحفظ في الإعدادات العادية `settings.store` وتتزامن كأي إعداد، وتقرأ الدالة العامة `kp_store_info` قائمة بيضاء منها فقط.
+
+دوال الزائر (دور `anon`): `kp_store_info`, `kp_store_products`, `kp_store_images`, `kp_store_order`, `kp_store_orders`, `kp_store_order_proof`, `kp_store_chat_send`, `kp_store_chat_get`, `kp_store_msg_img`.
+دوال الموظفين (أي عضو): `kp_store_status`, `kp_orders_list`, `kp_order_proof`, `kp_order_set`, `kp_order_link`, `kp_threads_list`, `kp_chat_staff_get`, `kp_chat_staff_send`, `kp_chat_staff_img`. وللمالك فقط: `kp_store_publish`.

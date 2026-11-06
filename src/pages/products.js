@@ -1,4 +1,5 @@
 // إدارة المنتجات: إضافة/تعديل/حذف محمي/أرشفة، تصنيفات، عروض، استيراد وتصدير Excel/CSV، توليد باركود، ماسح كاميرا.
+import * as db from '../core/db.js';
 import * as store from '../core/store.js';
 import * as ops from '../core/ops.js';
 import * as auth from '../core/auth.js';
@@ -46,10 +47,11 @@ export function productForm(id, defaults = {}, { stay = false } = {}) {
       { name: 'supplierId', label: 'المورد', type: 'select', options: sups },
       { name: 'desc', label: 'وصف المنتج', type: 'textarea', span: 2, rows: 2 },
       { name: 'track', label: 'تتبّع كمية المخزون لهذا المنتج', type: 'checkbox', span: 2 },
+      ...(db.isRemote() ? [{ name: 'online', label: 'إظهار هذا المنتج في المتجر الإلكتروني للمشترين', type: 'checkbox', span: 2 }] : []),
     ];
     const imgBox = () => html`<div class="row" style="margin-bottom:12px"><div id="imgp">${img ? html`<img class="thumb" style="width:72px;height:72px" src="${img}" alt="">` : html`<div class="thumb" style="width:72px;height:72px;display:flex;align-items:center;justify-content:center;color:var(--t2)">${icon('image', 28)}</div>`}</div><div class="col gap6"><div class="row wrap gap6"><button type="button" class="btn sm" data-img>${icon('image', 16)} اختيار صورة</button><button type="button" class="btn sm" data-imgcam>${icon('cam', 16)} التقاط</button>${img ? html`<button type="button" class="btn sm danger" data-imgrm>إزالة</button>` : ''}</div><div class="hint small muted">تُصغَّر الصورة تلقائياً وتُحفظ داخل التطبيق</div></div></div>`;
-    const collect = f => { const d = { ...f }; d.img = img; if (!canCost) delete d.cost; if (cur) delete d.stock; d.track = !!d.track; if (d.stock === '') d.stock = 0; return d; };
-    const m = formModal({ title: cur ? 'تعديل منتج' : 'منتج جديد', size: 'lg', fields, values: { ...v, track: v.track !== false }, submit: 'حفظ', intro: imgBox(), extraFooter: cur ? '' : html`<button type="button" class="btn soft" data-another>حفظ وإضافة آخر</button>`,
+    const collect = f => { const d = { ...f }; d.img = img; if (!canCost) delete d.cost; if (cur) delete d.stock; d.track = !!d.track; if ('online' in d) d.online = !!d.online; if (d.stock === '') d.stock = 0; return d; };
+    const m = formModal({ title: cur ? 'تعديل منتج' : 'منتج جديد', size: 'lg', fields, values: { ...v, track: v.track !== false, online: !v.hideOnline }, submit: 'حفظ', intro: imgBox(), extraFooter: cur ? '' : html`<button type="button" class="btn soft" data-another>حفظ وإضافة آخر</button>`,
       onSubmit: async f => { const p = await ops.saveProduct(collect(f), id); lastId = p.id; toast(cur ? 'تم تعديل المنتج' : 'تمت إضافة المنتج'); return p.id; },
       onReady: (mm, form) => {
         const $ = s => form.querySelector(s), setImg = d => { img = d; const box = form.querySelector('#imgp').parentElement; box.outerHTML = imgBox().toString(); };

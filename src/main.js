@@ -1,4 +1,5 @@
 // نقطة الإقلاع: فتح قاعدة البيانات → ترحيل → تحميل → واجهة. أي فشل يظهر بشاشة واضحة مع سبل الإنقاذ (البيانات القديمة لا تُمسّ).
+import './ui/display.js';          // يطبّق حجم الخط/الواجهة المحفوظ لهذا الجهاز قبل أي رسم
 import * as db from './core/db.js';
 import * as store from './core/store.js';
 import * as auth from './core/auth.js';
@@ -9,6 +10,9 @@ import { applyTheme, bootRoute } from './ui/shell.js';
 import { toast, html, icon } from './ui/components.js';
 import { esc, download } from './core/util.js';
 import { readLegacy } from './core/migrate.js';
+import * as sb from './lib/supabase.js';
+import { createRemote } from './core/remote.js';
+import { cloudGate } from './ui/cloud.js';
 
 const root = document.getElementById('root');
 const splash = (t, sub = '') => { root.innerHTML = `<div class="login"><div class="box center" style="gap:10px"><div class="skel" style="width:56px;height:56px;margin:0 auto;border-radius:16px"></div><h3>${esc(t)}</h3><div class="muted small">${esc(sub)}</div></div></div>`; };
@@ -24,16 +28,29 @@ function fatal(e) {
 
 async function boot() {
   const demo = isDemo();
+  const cloud = !demo && sb.getBackend() === 'supabase';      // وضع التجربة محلي دائماً
   try {
     splash('جاري التحميل...');
-    await db.open(dbNameFor());
-    await runMigrations({ legacy: !demo });
+    if (cloud) {
+      // الوضع السحابي: القاعدة المحلية تحفظ لقطات هذا الجهاز فقط؛ بيانات المتجر في Supabase
+      await db.open('kashier-pro-cloud');
+      const me = await cloudGate(root, splash);
+      const R = createRemote(); R.me = me; db.setRemote(R);
+      await R.load(n => splash('جاري تحميل بيانات المتجر من السحابة', n + ' سجل'));
+      auth.setCloudStaff(me.role !== 'owner');
+      await runMigrations({ legacy: false });
+      import('./core/storewatch.js').then(m => m.start());   // شارات طلبات المتجر الإلكتروني
+    } else {
+      await db.open(dbNameFor());
+      await runMigrations({ legacy: !demo });
+    }
     await store.load();
     if (demo && store.count('products') === 0) { await seedDemo(m => splash('جاري تجهيز بيانات التجربة', m)); }
     applyTheme(); auth.restoreSession();
     db.persist();
     await bootRoute();
-    if (!demo) setTimeout(() => autoBackupIfDue().catch(console.warn).then(() => import('./lib/sync.js')).then(m => m.autoPushIfDue()).catch(console.warn), 4000);
+    if (cloud) import('./pages/settings-cloud.js').then(m => m.offerLocalUpload()).catch(console.warn);
+    if (!demo) setTimeout(() => autoBackupIfDue().catch(console.warn).then(() => !cloud && import('./lib/sync.js')).then(m => m && m.autoPushIfDue()).catch(console.warn), 4000);
   } catch (e) { fatal(e); }
 }
 

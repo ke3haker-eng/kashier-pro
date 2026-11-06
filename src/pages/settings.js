@@ -6,6 +6,8 @@ import * as auth from '../core/auth.js';
 import * as db from '../core/db.js';
 import * as bk from '../core/backup.js';
 import * as sync from '../lib/sync.js';
+import * as cloudSettings from './settings-cloud.js';
+import * as shopSettings from './settings-shop.js';
 import { SCHEMA_VERSION } from '../core/migrate.js';
 import { APP_VERSION } from '../version.js';
 import { isDemo, enterDemo, exitDemo, resetDemo } from '../core/demo.js';
@@ -15,7 +17,7 @@ import { pickImage } from '../lib/image.js';
 import { invoiceHTML, printHTML } from '../lib/print.js';
 
 const can = p => auth.can(p);
-const TABS = [['store', 'المتجر', 'settings.manage'], ['invoice', 'الفاتورة والطباعة', 'settings.manage'], ['tax', 'الضريبة والتكلفة', 'settings.manage'], ['pos', 'المبيعات والمخزون', 'settings.manage'], ['look', 'المظهر والتنبيهات', 'settings.manage'], ['backup', 'النسخ الاحتياطي', 'backup.manage'], ['server', 'الخادم والسحابة', 'settings.manage'], ['system', 'النظام والتجربة', 'settings.manage']];
+const TABS = [['store', 'المتجر', 'settings.manage'], ['invoice', 'الفاتورة والطباعة', 'settings.manage'], ['tax', 'الضريبة والتكلفة', 'settings.manage'], ['pos', 'المبيعات والمخزون', 'settings.manage'], ['look', 'المظهر والتنبيهات', 'settings.manage'], ['backup', 'النسخ الاحتياطي', 'backup.manage'], ['cloud', 'السحابة (Supabase)', 'settings.manage'], ['shop', 'المتجر الإلكتروني', 'settings.manage'], ['server', 'نسخ احتياطي بخادم', 'settings.manage'], ['system', 'النظام والتجربة', 'settings.manage']];
 const st = { tab: '' };
 let root, token = 0;
 
@@ -65,7 +67,7 @@ function posTab() {
 }
 
 function lookTab() {
-  return card('المظهر والتنبيهات', html`${row('المظهر', sel('theme', [['auto', 'تلقائي (حسب الجهاز)'], ['light', 'نهاري'], ['dark', 'ليلي']]))}${row('اهتزاز عند المسح والإضافة', sw('vib', 'bit'))}${row('صوت عند المسح والإضافة', sw('snd', 'bit'))}${row('إغلاق الكاميرا بعد كل مسح', sw('once', 'bit'), 'مناسب للمسح المنفرد؛ أوقفه لمسح عدة أصناف متتالية دون إعادة فتح الكاميرا')}`);
+  return html`${card('حجم الخط والواجهة (لهذا الجهاز فقط)', html`${row('تكبير أو تصغير الخط والأزرار والمسافات', html`<button class="btn" data-open-display>${icon('maximize', 16)} ضبط الحجم</button>`, 'مناسب لشاشات الجوال الصغيرة أو لمن يريد خطاً أكبر. لا يؤثر على الأجهزة الأخرى.')}`)}${card('المظهر والتنبيهات', html`${row('المظهر', sel('theme', [['auto', 'تلقائي (حسب الجهاز)'], ['light', 'نهاري'], ['dark', 'ليلي']]))}${row('اهتزاز عند المسح والإضافة', sw('vib', 'bit'))}${row('صوت عند المسح والإضافة', sw('snd', 'bit'))}${row('إغلاق الكاميرا بعد كل مسح', sw('once', 'bit'), 'مناسب للمسح المنفرد؛ أوقفه لمسح عدة أصناف متتالية دون إعادة فتح الكاميرا')}`)}`;
 }
 
 // ---------- النسخ الاحتياطي ----------
@@ -136,9 +138,9 @@ async function systemTab() {
 // ---------- الإطار ----------
 async function draw() {
   const my = ++token; if (!root) return;
-  const tb = TABS.filter(t => can(t[2])); if (!tb.length) { root.innerHTML = emptyState('lock', 'ليست لديك صلاحية').toString(); return; }
+  const tb = TABS.filter(t => can(t[2]) && !(t[0] === 'server' && db.isRemote())); if (!tb.length) { root.innerHTML = emptyState('lock', 'ليست لديك صلاحية').toString(); return; }
   if (!tb.some(t => t[0] === st.tab)) st.tab = tb[0][0];
-  const fn = { store: storeTab, invoice: invoiceTab, tax: taxTab, pos: posTab, look: lookTab, backup: backupTab, server: serverTab, system: systemTab }[st.tab];
+  const fn = { store: storeTab, invoice: invoiceTab, tax: taxTab, pos: posTab, look: lookTab, backup: backupTab, cloud: cloudSettings.cloudTab, shop: () => shopSettings.shopTab({ row, tx, sw, card, getp }), server: serverTab, system: systemTab }[st.tab];
   const body = await fn(); if (my !== token || !root) return;
   const y = window.scrollY, ae = document.activeElement?.dataset?.set;
   root.innerHTML = html`${pageHead('الإعدادات', '', 'تُحفظ التغييرات تلقائياً فور تعديلها')}${tabs(tb.map(t => [t[0], t[1]]), st.tab)}<div class="set-body">${body}</div>`.toString();
@@ -171,6 +173,9 @@ export default {
       const T = e.target; const q = s => T.closest(s);
       try {
         const tb = q('[data-tab]'); if (tb) { st.tab = tb.dataset.tab; return void draw(); }
+        if (q('[data-open-display]')) return void import('../ui/display-ui.js').then(x => x.openDisplayPrefs());
+        if (await cloudSettings.click(q, { draw })) return;
+        if (await shopSettings.click(q, { draw })) return;
         if (q('[data-logo]')) { const img = await pickImage({ max: 256, quality: 0.85 }); if (img) { await ops.saveSettings({ logo: img }); toast('تم حفظ الشعار'); draw(); } return; }
         if (q('[data-logo-del]')) { await ops.saveSettings({ logo: null }); draw(); return; }
         if (q('[data-test-print]')) return printHTML(invoiceHTML(sampleInvoice(), S_().invoice.paper), S_().invoice.paper);

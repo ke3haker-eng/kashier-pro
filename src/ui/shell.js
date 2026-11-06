@@ -1,4 +1,5 @@
 // الهيكل العام: الشريط الجانبي/السفلي، الشريط العلوي، التوجيه (hash)، تسجيل الدخول، التنبيهات والثيم.
+import * as db from '../core/db.js';
 import * as store from '../core/store.js';
 import * as auth from '../core/auth.js';
 import * as ops from '../core/ops.js';
@@ -30,7 +31,7 @@ function frame() {
   const S = store.settings(), rs = visibleRoutes();
   const first = rs.find(r => r.mobile) ? rs.filter(r => r.mobile).slice(0, 4) : [];
   document.getElementById('root').innerHTML = `
-  ${S.demo ? `<div class="demo-bar" id="demobar">وضع التجربة (Demo) — بيانات وهمية منفصلة تماماً عن بياناتك الحقيقية <button data-exit-demo>الخروج من وضع التجربة</button></div>` : ''}
+  ${S.demo ? `<div class="demo-bar" id="demobar"><span>وضع التجربة — بيانات وهمية منفصلة عن بياناتك</span> <button data-exit-demo>خروج</button></div>` : ''}
   <div class="app"><aside class="side" id="side">
     <div class="brand"><div class="logo">${S.logo ? `<img src="${esc(S.logo)}" alt="">` : icon('cart', 20).toString()}</div><div class="bt">${esc(S.name || 'كاشير الدكان')}<small>نظام إدارة السوبر ماركت</small></div></div>
     <nav class="nav" id="nav">${rs.map(r => `<a href="#/${r.id}" data-r="${r.id}">${icon(r.icon, 20)}<span>${r.label}</span><i class="cnt" data-cnt="${r.id}" hidden></i></a>`).join('')}</nav>
@@ -39,11 +40,12 @@ function frame() {
   <div class="main"><header class="top"><button class="btn icon ghost menu" data-more aria-label="القائمة">${icon('menu', 20)}</button><h1 id="h1"></h1><div class="sp"></div>
     <span class="pill hide-s" id="shiftpill" data-shift hidden></span><span class="pill" id="offpill" hidden>${icon('wifiOff', 14)} دون اتصال</span>
     <button class="btn icon ghost hide-s" data-fs title="ملء الشاشة" aria-label="ملء الشاشة">${icon('maximize', 18)}</button>
-    <button class="btn icon ghost" data-theme-cycle title="المظهر" aria-label="المظهر" id="themebtn"></button>
+    <button class="btn icon ghost hide-s" data-display title="حجم الخط والواجهة" aria-label="حجم الخط والواجهة"><b style="font-size:.95rem">Aa</b></button>
+    <button class="btn icon ghost hide-s" data-theme-cycle title="المظهر" aria-label="المظهر" id="themebtn"></button>
     <button class="btn icon ghost" data-bell aria-label="التنبيهات" style="position:relative">${icon('bell', 20)}<i class="cnt" id="bellcnt" hidden style="position:absolute;top:2px;inset-inline-end:2px;background:var(--bad);color:#fff;border-radius:99px;font-size:.62rem;padding:0 5px;font-style:normal"></i></button>
     <button class="pill" data-user id="userbtn"></button></header>
     <main id="view"></main></div></div>
-  <nav class="bnav" id="bnav">${first.map(r => `<a href="#/${r.id}" data-r="${r.id}">${icon(r.icon, 22)}<span>${r.label}</span><i class="cnt" data-cnt="${r.id}" hidden></i></a>`).join('')}<button data-more>${icon('menu', 22)}<span>المزيد</span></button></nav>`;
+  <nav class="bnav" id="bnav">${first.map(r => `<a href="#/${r.id}" data-r="${r.id}">${icon(r.icon, 22)}<span>${r.label}</span><i class="cnt" data-cnt="${r.id}" hidden></i></a>`).join('')}<button data-more>${icon('menu', 22)}<span>المزيد</span><i class="cnt" data-cnt="orders-more" hidden></i></button></nav>`;
   view = document.getElementById('view'); refreshChrome();
 }
 
@@ -58,7 +60,12 @@ function refreshChrome() {
   const inv = al.filter(a => a.route.includes('inventory')).reduce((s, a) => s + (parseInt(a.text) || 0), 0);
   document.querySelectorAll('[data-cnt=inventory]').forEach(e => { e.hidden = !inv; e.textContent = inv; });
   document.querySelectorAll('[data-r]').forEach(a => a.classList.toggle('on', cur && a.dataset.r === cur.id));
-  const nl = document.getElementById('netlbl'), nd = document.getElementById('netdot'); if (nl) { const on = navigator.onLine; nl.textContent = 'يعمل محلياً على هذا الجهاز' + (on ? '' : ' — دون اتصال'); nd?.classList.toggle('off', !on); } const op = document.getElementById('offpill'); if (op) op.hidden = navigator.onLine;
+  const nl = document.getElementById('netlbl'), nd = document.getElementById('netdot'), op = document.getElementById('offpill');
+  if (db.isRemote()) {   // الوضع السحابي: الحالة من آخر اتصال ناجح بالخادم وليس من navigator.onLine وحده
+    const st = db.remote().status, ok = navigator.onLine && st.state === 'ok';
+    if (nl) nl.textContent = ok ? 'متصل بالسحابة' + (S.name ? ' — ' + S.name : '') : 'غير متصل بالسحابة — الحفظ متوقف';
+    nd?.classList.toggle('off', !ok); if (op) { op.hidden = ok; op.lastChild.textContent = ' غير متصل بالسحابة'; }
+  } else { if (nl) { const on = navigator.onLine; nl.textContent = 'يعمل محلياً على هذا الجهاز' + (on ? '' : ' — دون اتصال'); nd?.classList.toggle('off', !on); } if (op) op.hidden = navigator.onLine; }
 }
 
 // ---------- التوجيه ----------
@@ -127,7 +134,8 @@ function showAlerts(btn) {
 function moreSheet() {
   const rs = visibleRoutes();
   const m = modal({ title: store.settings().name || 'القائمة', body: html`<div class="grid g3 keep" style="grid-template-columns:repeat(3,minmax(0,1fr))">${rs.map(r => html`<a href="#/${r.id}" data-nav class="card flat center" style="text-decoration:none;color:var(--t);padding:14px 4px;display:flex;flex-direction:column;align-items:center;gap:6px;${raw(cur?.id === r.id ? 'border-color:var(--p);background:var(--pb)' : '')}">${icon(r.icon, 26)}<span class="small bold">${r.label}</span></a>`)}</div>${auth.enabled() ? html`<button class="btn block" data-lo>${icon('logout', 18)} تسجيل الخروج (${auth.current()?.name})</button>` : ''}` });
-  m.el.addEventListener('click', e => { if (e.target.closest('[data-nav]')) m.close(); if (e.target.closest('[data-lo]')) { m.close(); auth.logout(); route(); } });
+  m.body.insertAdjacentHTML('beforeend', `<div class="row wrap" style="margin-top:12px"><button class="btn sm" data-display-open>${icon('maximize', 16)} حجم الخط والواجهة</button><button class="btn sm" data-theme-cycle>${icon('sun', 16)} المظهر</button></div>`);
+  m.el.addEventListener('click', e => { if (e.target.closest('[data-display-open]')) { m.close(); import('./display-ui.js').then(x => x.openDisplayPrefs()); } if (e.target.closest('[data-nav]')) m.close(); if (e.target.closest('[data-lo]')) { m.close(); auth.logout(); route(); } });
 }
 
 async function cycleTheme() { const order = ['auto', 'light', 'dark'], t = store.settings().theme; await ops.saveSettings({ theme: order[(order.indexOf(t) + 1) % 3] }); applyTheme(); refreshChrome(); toast('المظهر: ' + ({ auto: 'تلقائي', light: 'نهاري', dark: 'ليلي' })[store.settings().theme], 'info', 1400); }
@@ -141,6 +149,7 @@ function bindGlobal() {
   document.addEventListener('click', e => {
     const t = e.target;
     if (t.closest('[data-more]')) return moreSheet();
+    if (t.closest('[data-display]')) return import('./display-ui.js').then(x => x.openDisplayPrefs());
     if (t.closest("[data-theme-cycle]")) return cycleTheme();
     if (t.closest('[data-fs]')) return document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.();
     if (t.closest('[data-bell]')) return showAlerts(t.closest('[data-bell]'));
@@ -149,8 +158,32 @@ function bindGlobal() {
     if (t.closest('[data-exit-demo]')) return import('../core/demo.js').then(m => m.exitDemo());
   });
   window.addEventListener('hashchange', route);
-  window.addEventListener('online', refreshChrome); window.addEventListener('offline', refreshChrome);
+  window.addEventListener('online', refreshChrome); window.addEventListener('offline', refreshChrome); window.addEventListener('kp-cloud', refreshChrome); window.addEventListener('kp-store', e => {
+    const d = e.detail, n = d.orders + d.unread;
+    document.querySelectorAll('[data-cnt=orders],[data-cnt=orders-more]').forEach(x => { x.hidden = !n; x.textContent = n > 99 ? '99+' : n; });
+    if (d.newOrders) toast('وصل طلب جديد من المتجر الإلكتروني', 'ok', 5000); else if (d.newMsgs) toast('رسالة جديدة من أحد المشترين', 'ok', 4000);
+    if ((d.newOrders || d.newMsgs) && navigator.vibrate) try { navigator.vibrate(120); } catch { }
+  }); window.addEventListener('kp-cloud-note', e => toast(e.detail.msg, 'warn', 6000));
   ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, resetLock, { passive: true }));
   store.on(names => { onData(names); if (names.has('meta')) { applyTheme(); } });
 }
 export const rerenderChrome = refreshChrome;
+
+// جوال: الأزرار الثانوية في رأس الصفحة (استيراد/تصدير/تصنيفات...) تُجمع في زر «⋯» يفتح قائمة بدل صفوف أزرار متراكمة.
+// الإخفاء/الإظهار بالـ CSS (≤700px) فلا حاجة لمتابعة تغيّر حجم الشاشة. المنطق الأصلي للأزرار لا يتغيّر: القائمة تضغط الزر الأصلي.
+function compactActs() {
+  document.querySelectorAll('.page-h .acts:not([data-c])').forEach(a => {
+    a.dataset.c = '1';
+    const sec = [...a.querySelectorAll('.btn:not(.primary)')].filter(b => !b.matches('[data-more-acts]'));
+    if (sec.length < 2) return;
+    sec.forEach(b => b.classList.add('m-sec'));
+    const mb = document.createElement('button'); mb.type = 'button'; mb.className = 'btn icon m-more'; mb.setAttribute('aria-label', 'المزيد'); mb.dataset.moreActs = '1'; mb.innerHTML = icon('more', 20).toString();
+    mb.onclick = () => {
+      const m = modal({ title: 'خيارات الصفحة', size: 'sm', body: html`<div class="col" style="gap:8px">${sec.map((b, i) => html`<button class="btn" style="justify-content:flex-start" data-i="${i}">${raw(b.innerHTML)}${b.title && !b.textContent.trim() ? b.title : ''}</button>`)}</div>` });
+      m.el.addEventListener('click', e => { const t = e.target.closest('[data-i]'); if (!t) return; m.close(); sec[+t.dataset.i].click(); });
+    };
+    a.append(mb);
+  });
+}
+let acting = 0;
+new MutationObserver(() => { cancelAnimationFrame(acting); acting = requestAnimationFrame(compactActs); }).observe(document.documentElement, { childList: true, subtree: true });

@@ -20,7 +20,14 @@ class Draft {
   audit(action, entity, ref, detail) { this.put('audit', { id: uid(), t: nowISO(), ...who(), action, entity, ref: ref || '', detail: detail || '' }); }
   done() { for (const [s, rec] of this.w.values()) { if (!(this.ch.del[s] || []).includes(rec.id)) (this.ch.put[s] ||= []).push(rec); } return this.ch; }
 }
-const run = async (fn) => { const d = new Draft(); const result = await fn(d); await db.commit(d.done()); return result; };
+// عند التعارض مع جهاز آخر (الوضع السحابي) تُحدَّث البيانات وتُعاد العملية على الأحدث بدل إظهار خطأ للمستخدم
+const run = async (fn) => {
+  for (let i = 0; ; i++) {
+    const d = new Draft(); const result = await fn(d);
+    try { await db.commit(d.done()); return result; }
+    catch (e) { if (e.code === 'CONFLICT' && i < 3) { await db.refresh(); continue; } throw e; }
+  }
+};
 
 // ---------- المخزون الأساسي ----------
 function move(d, p, delta, type, o = {}) {
@@ -61,7 +68,7 @@ export function cleanProduct(data, cur, o = {}) {
   const supplierId = data.supplierId === undefined ? (cur?.supplierId || '') : (data.supplierId && get('suppliers', data.supplierId) ? data.supplierId : '');
   const img = data.img === undefined ? (cur?.img ?? null) : data.img;
   if (img && String(img).length > 400000) throw E('حجم صورة المنتج كبير جداً');
-  return { name, price: Math.round(price * 1000) / 1000, cost: cost == null ? null : Math.round(cost * 1000) / 1000, unit, barcode, code, stock: r3(stockIn), min, expiry, cat, supplierId, desc: String(data.desc ?? cur?.desc ?? '').trim().slice(0, 500), img: img || null, track: data.track === undefined ? (cur ? cur.track !== false : true) : !!data.track, active: data.active === undefined ? (cur ? cur.active !== false : true) : !!data.active };
+  return { name, price: Math.round(price * 1000) / 1000, cost: cost == null ? null : Math.round(cost * 1000) / 1000, unit, barcode, code, stock: r3(stockIn), min, expiry, cat, supplierId, desc: String(data.desc ?? cur?.desc ?? '').trim().slice(0, 500), hideOnline: data.online === undefined ? !!cur?.hideOnline : !data.online, img: img || null, track: data.track === undefined ? (cur ? cur.track !== false : true) : !!data.track, active: data.active === undefined ? (cur ? cur.active !== false : true) : !!data.active };
 }
 export const productUsage = pid => {
   for (const i of list('invoices')) if (i.items.some(l => l.pid === pid)) return 'الفواتير';
@@ -210,6 +217,7 @@ export async function completeSale({ cart, payments, customerId = '', note = '',
     const id = uid(), t = nowISO();
     for (const it of items) {
       const p = d.edit('products', it.pid);
+      if (p.track && !S.stock.allowNegative && p.stock + 1e-9 < it.qty) throw E(`الكمية المتوفرة من "${p.name}" هي ${p.stock} فقط`, 'STOCK');
       if (p.track) { it.batches = deductBatches(d, p.id, it.qty); move(d, p, -it.qty, 'sale', { ref: id, refNo: no }); }
     }
     const pays = paymentLines(st); const kinds = pays.length + (st.credit > 0 ? 1 : 0);
@@ -442,7 +450,9 @@ export async function deleteUser(id) {
 
 // ---------- الإعدادات ----------
 export async function saveSettings(patch) {
+  if (db.isRemote()) { const dev = Object.fromEntries(Object.entries(patch).filter(([k]) => store.DEV_KEYS.includes(k))); if (Object.keys(dev).length) { store.setDevPrefs(dev); patch = Object.fromEntries(Object.entries(patch).filter(([k]) => !(k in dev))); if (!Object.keys(patch).length) return settings(); } }
   const cur = settings(); const next = deepMerge(cur, patch);
+  if (db.isRemote()) for (const k of store.DEV_KEYS) { const sh = store.S.meta?.settings?.[k]; if (sh !== undefined) next[k] = sh; else delete next[k]; }
   if (next.tax.rate < 0 || next.tax.rate > 100) throw E('نسبة الضريبة يجب أن تكون بين 0 و100');
   if (next.pos.maxDiscPct < 0 || next.pos.maxDiscPct > 100) throw E('حد الخصم غير صحيح');
   if (next.stock.lowDefault < 0) throw E('الحد الأدنى الافتراضي غير صحيح');

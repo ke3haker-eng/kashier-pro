@@ -12,7 +12,10 @@ const emit = () => listeners.forEach(f => f(cur));
 export const enabled = () => !!store.settings().auth.enabled;
 export function current() { return enabled() ? cur : OWNER; }
 export const isLoggedIn = () => !enabled() || !!cur;
-export function can(perm, user = current()) { return !!user && roleHas(user.role, perm, store.settings().roles); }
+// في الوضع السحابي: حساب «موظف» في Supabase لا يدير الموظفين ولا الإعدادات ولا النسخ مهما كانت صلاحيات PIN (الخادم يمنعه من كتابة المستخدمين أيضاً)
+let cloudStaff = false; export const setCloudStaff = v => { cloudStaff = !!v; };
+const CLOUD_STAFF_DENY = ['users.manage', 'settings.manage', 'backup.manage'];
+export function can(perm, user = current()) { if (cloudStaff && CLOUD_STAFF_DENY.includes(perm)) return false; return !!user && roleHas(user.role, perm, store.settings().roles); }
 
 // ---------- PIN ----------
 const enc = new TextEncoder();
