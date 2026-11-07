@@ -4,6 +4,7 @@ import * as store from '../core/store.js';
 import * as auth from '../core/auth.js';
 import * as ops from '../core/ops.js';
 import { alerts } from '../core/analytics.js';
+import * as sw from '../core/storewatch.js';
 import { ROUTES, byId } from './routes.js';
 import { html, raw, icon, modal, toast, confirmBox, delegate, closeAllModals, skeleton, field, emptyState } from './components.js';
 import { latinDigits, $, esc } from '../core/util.js';
@@ -49,16 +50,32 @@ function frame() {
   view = document.getElementById('view'); refreshChrome();
 }
 
+// ---------- تنبيهات المتجر الإلكتروني (طلبات جديدة + رسائل غير مقروءة) ----------
+const canOrders = () => db.isRemote() && visibleRoutes().some(r => r.id === 'orders');
+function storeAlerts() {
+  if (!canOrders()) return [];
+  const a = [], d = sw.state;
+  if (d.orders) a.push({ route: '#/orders', kind: 'warn', icon: 'chat', n: d.orders, text: `${d.orders} طلب جديد من المتجر الإلكتروني بانتظار المراجعة` });
+  if (d.unread) a.push({ route: '#/orders?tab=chat', kind: 'warn', icon: 'chat', n: d.unread, text: `${d.unread} رسالة غير مقروءة من المشترين` });
+  return a;
+}
+// الشارة الحمراء على «الطلبات والمحادثات» (القائمة الجانبية، وبطاقتها داخل «المزيد»، وزر «المزيد»)
+function applyStoreBadges() {
+  const n = canOrders() ? sw.state.orders + sw.state.unread : 0;
+  document.querySelectorAll('[data-cnt=orders],[data-cnt=orders-more]').forEach(x => { x.hidden = !n; x.textContent = n > 99 ? '99+' : n; });
+}
+
 function refreshChrome() {
   const S = store.settings(), cu = auth.current();
   { const bt = document.querySelector('.brand .bt'); if (bt && bt.firstChild) bt.firstChild.textContent = S.name || 'كاشير الدكان'; const lg = document.querySelector('.brand .logo'); if (lg) lg.innerHTML = S.logo ? `<img src="${esc(S.logo)}" alt="">` : icon('cart', 20).toString(); document.title = S.name || 'كاشير الدكان'; }
   const tb = document.getElementById('themebtn'); if (tb) tb.innerHTML = (S.theme === 'dark' ? icon('moon', 20) : S.theme === 'light' ? icon('sun', 20) : icon('sun', 20)).toString() + (S.theme === 'auto' ? '<small style="position:absolute;bottom:1px;font-size:.5rem;font-weight:800">A</small>' : ''); if (tb) tb.style.position = 'relative';
   const ub = document.getElementById('userbtn'); if (ub) ub.innerHTML = `${icon('user', 16)}<span class="hide-s">${esc(cu?.name || '')}</span>${auth.enabled() ? icon('logout', 14).toString() : ''}`; if (ub) ub.title = auth.enabled() ? 'تسجيل الخروج' : cu?.name || '';
   const sp = document.getElementById('shiftpill'); if (sp) { const sh = myShift(); sp.hidden = !(S.pos.requireShift || sh); sp.innerHTML = sh ? `<i class="dot"></i> وردية مفتوحة` : `<i class="dot off"></i> لا توجد وردية`; }
-  const al = alerts(); const total = al.length ? al.reduce((s, a) => s + (parseInt(a.text) || 1), 0) : 0;
+  const al = alerts(); const sa = storeAlerts(); const total = (al.length ? al.reduce((s, a) => s + (parseInt(a.text) || 1), 0) : 0) + sa.reduce((s, a) => s + a.n, 0);
   const bc = document.getElementById('bellcnt'); if (bc) { bc.hidden = !total; bc.textContent = total > 99 ? '99+' : total; }
   const inv = al.filter(a => a.route.includes('inventory')).reduce((s, a) => s + (parseInt(a.text) || 0), 0);
   document.querySelectorAll('[data-cnt=inventory]').forEach(e => { e.hidden = !inv; e.textContent = inv; });
+  applyStoreBadges();
   document.querySelectorAll('[data-r]').forEach(a => a.classList.toggle('on', cur && a.dataset.r === cur.id));
   const nl = document.getElementById('netlbl'), nd = document.getElementById('netdot'), op = document.getElementById('offpill');
   if (db.isRemote()) {   // الوضع السحابي: الحالة من آخر اتصال ناجح بالخادم وليس من navigator.onLine وحده
@@ -125,7 +142,7 @@ async function forgotPin() {
 
 // ---------- تنبيهات ----------
 function showAlerts(btn) {
-  document.querySelector('.popover')?.remove(); const al = alerts();
+  document.querySelector('.popover')?.remove(); const al = [...storeAlerts(), ...alerts()];
   const p = document.createElement('div'); p.className = 'popover'; const r = btn.getBoundingClientRect(); p.style.top = r.bottom + 8 + window.scrollY + 'px'; p.style.insetInlineStart = Math.max(8, Math.min(r.left, innerWidth - 290)) + 'px'; p.style.position = 'absolute';
   p.innerHTML = `<b style="padding:6px 8px;display:block">التنبيهات</b>` + (al.length ? al.map(a => `<a class="list-item" style="text-decoration:none;color:inherit;padding:8px" href="${a.route}"><span class="${a.kind}">${icon(a.icon, 20)}</span><span>${esc(a.text)}</span></a>`).join('') : `<div class="empty" style="padding:20px">لا توجد تنبيهات 🎉</div>`);
   document.body.append(p); const off = e => { if (!p.contains(e.target)) { p.remove(); document.removeEventListener('mousedown', off, true); } }; setTimeout(() => document.addEventListener('mousedown', off, true), 0); p.addEventListener('click', () => p.remove());
@@ -133,7 +150,8 @@ function showAlerts(btn) {
 
 function moreSheet() {
   const rs = visibleRoutes();
-  const m = modal({ title: store.settings().name || 'القائمة', body: html`<div class="grid g3 keep" style="grid-template-columns:repeat(3,minmax(0,1fr))">${rs.map(r => html`<a href="#/${r.id}" data-nav class="card flat center" style="text-decoration:none;color:var(--t);padding:14px 4px;display:flex;flex-direction:column;align-items:center;gap:6px;${raw(cur?.id === r.id ? 'border-color:var(--p);background:var(--pb)' : '')}">${icon(r.icon, 26)}<span class="small bold">${r.label}</span></a>`)}</div>${auth.enabled() ? html`<button class="btn block" data-lo>${icon('logout', 18)} تسجيل الخروج (${auth.current()?.name})</button>` : ''}` });
+  const m = modal({ title: store.settings().name || 'القائمة', body: html`<div class="grid g3 keep" style="grid-template-columns:repeat(3,minmax(0,1fr))">${rs.map(r => html`<a href="#/${r.id}" data-nav class="card flat center" style="position:relative;text-decoration:none;color:var(--t);padding:14px 4px;display:flex;flex-direction:column;align-items:center;gap:6px;${raw(cur?.id === r.id ? 'border-color:var(--p);background:var(--pb)' : '')}">${icon(r.icon, 26)}<span class="small bold">${r.label}</span>${r.id === 'orders' ? html`<i class="cnt" data-cnt="orders" hidden style="position:absolute;top:6px;inset-inline-end:8px;background:var(--bad);color:#fff;border-radius:99px;font-size:.7rem;min-width:1.2rem;text-align:center;padding:0 .35rem;font-style:normal;font-weight:700;line-height:1.3rem"></i>` : ''}</a>`)}</div>${auth.enabled() ? html`<button class="btn block" data-lo>${icon('logout', 18)} تسجيل الخروج (${auth.current()?.name})</button>` : ''}` });
+  applyStoreBadges();
   m.body.insertAdjacentHTML('beforeend', `<div class="row wrap" style="margin-top:12px"><button class="btn sm" data-display-open>${icon('maximize', 16)} حجم الخط والواجهة</button><button class="btn sm" data-theme-cycle>${icon('sun', 16)} المظهر</button></div>`);
   m.el.addEventListener('click', e => { if (e.target.closest('[data-display-open]')) { m.close(); import('./display-ui.js').then(x => x.openDisplayPrefs()); } if (e.target.closest('[data-nav]')) m.close(); if (e.target.closest('[data-lo]')) { m.close(); auth.logout(); route(); } });
 }
@@ -159,9 +177,9 @@ function bindGlobal() {
   });
   window.addEventListener('hashchange', route);
   window.addEventListener('online', refreshChrome); window.addEventListener('offline', refreshChrome); window.addEventListener('kp-cloud', refreshChrome); window.addEventListener('kp-store', e => {
-    const d = e.detail, n = d.orders + d.unread;
-    document.querySelectorAll('[data-cnt=orders],[data-cnt=orders-more]').forEach(x => { x.hidden = !n; x.textContent = n > 99 ? '99+' : n; });
+    const d = e.detail; refreshChrome();   // يحدّث الجرس والشارات معاً
     if (d.newOrders) toast('وصل طلب جديد من المتجر الإلكتروني', 'ok', 5000); else if (d.newMsgs) toast('رسالة جديدة من أحد المشترين', 'ok', 4000);
+    else if (d.first && canOrders() && d.orders) toast(`لديك ${d.orders} طلب جديد من المتجر الإلكتروني بانتظارك`, 'warn', 6000);
     if ((d.newOrders || d.newMsgs) && navigator.vibrate) try { navigator.vibrate(120); } catch { }
   }); window.addEventListener('kp-cloud-note', e => toast(e.detail.msg, 'warn', 6000));
   ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, resetLock, { passive: true }));

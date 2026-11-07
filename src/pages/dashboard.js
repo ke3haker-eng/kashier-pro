@@ -1,6 +1,8 @@
 // لوحة التحكم: كل الأرقام محسوبة من البيانات الفعلية في قاعدة البيانات.
 import * as store from '../core/store.js';
 import * as auth from '../core/auth.js';
+import * as db from '../core/db.js';
+import * as sw from '../core/storewatch.js';
 import { summary, series, productStats, inventory, alerts, salesIn } from '../core/analytics.js';
 import { html, raw, icon, money, pageHead, statCard, table, badge, emptyState, seg, mny } from '../ui/components.js';
 import { barChart, lineChart, donut, hbars } from '../ui/charts.js';
@@ -29,6 +31,7 @@ function draw() {
 
   root.innerHTML = html`
   ${pageHead('مرحباً بك في لوحة التحكم 👋', html`${auth.can('pos.sell') ? html`<a class="btn primary" href="#/pos">${icon('pos', 18)} فتح نقطة البيع</a>` : ''}`, (S.name ? S.name + ' — ' : '') + new Date().toLocaleDateString('ar-EG-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))}
+  <div id="storeBanner">${storeBanner()}</div>
   ${noData ? html`<div class="card mb" style="border:2px dashed var(--b);text-align:center;box-shadow:none"><h3>ابدأ باستخدام النظام</h3><p class="muted" style="margin:6px 0 12px;line-height:1.9">لا توجد بيانات بعد. أضف منتجاتك، أو استورد قائمة من Excel، أو جرّب النظام ببيانات وهمية في وضع منفصل لا يلمس بياناتك الحقيقية.</p><div class="row wrap" style="justify-content:center">${auth.can('products.edit') ? html`<a class="btn primary" href="#/products?new=1">${icon('plus', 16)} إضافة أول منتج</a><a class="btn" href="#/products">${icon('upload', 16)} استيراد من Excel</a>` : ''}<button class="btn soft" data-demo>${icon('zap', 16)} تجربة النظام (وضع Demo)</button></div></div>` : ''}
   <div class="stats mb">
     ${statCard({ label: 'مبيعات اليوم', value: money(td.sales), icon: 'cart', tone: 'y', sub: chg(td.sales, yd.sales).text, subKind: chg(td.sales, yd.sales).kind })}
@@ -55,6 +58,13 @@ function draw() {
     <div class="card" style="${raw(al.length ? 'background:linear-gradient(135deg,var(--badb),var(--card))' : '')}"><div class="card-h"><h3>${icon('alert', 18)} تنبيهات مهمة</h3></div>${al.length ? html`<div>${al.map(a => html`<a class="list-item" href="${a.route}" style="text-decoration:none;color:inherit"><span class="${a.kind}">${icon(a.icon, 22)}</span><span class="grow">${a.text}</span>${icon('chevL', 16)}</a>`)}</div>${lowList.length ? html`<div class="small muted" style="margin-top:8px">أمثلة: ${lowList.map(p => p.name).join('، ')}</div>` : ''}` : emptyState('check', 'لا توجد تنبيهات')}</div>
   </div>`.toString();
 }
+
+// شريط تنبيه الطلبات الجديدة والرسائل غير المقروءة من المتجر الإلكتروني (يتحدّث وحده دون إعادة رسم اللوحة)
+const storeBanner = () => {
+  const d = sw.state; if (!db.isRemote() || !auth.can('pos.sell') || !(d.orders || d.unread)) return '';
+  return html`<a class="card mb" href="#/orders${d.orders ? '' : '?tab=chat'}" style="display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--t);border:1px solid var(--bad);background:color-mix(in srgb,var(--bad) 8%,var(--card))">${icon('chat', 24)}<div style="flex:1;min-width:0"><b>${d.orders ? d.orders + ' طلب جديد من المتجر الإلكتروني' : ''}${d.orders && d.unread ? ' · ' : ''}${d.unread ? d.unread + ' رسالة غير مقروءة' : ''}</b><div class="small muted">اضغط للمراجعة</div></div></a>`;
+};
+window.addEventListener('kp-store', () => { const el = root?.querySelector('#storeBanner'); if (el) el.innerHTML = storeBanner().toString(); });
 
 let bound = new WeakSet();
 export default {

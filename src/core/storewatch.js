@@ -12,7 +12,7 @@ export function start() {
       try {
         const s = await sb.rpc('kp_store_status'), prev = { ...state };
         Object.assign(state, { on: !!s.on, slug: s.slug || '', orders: +s.new_orders || 0, unread: +s.unread || 0 });
-        window.dispatchEvent(new CustomEvent('kp-store', { detail: { ...state, newOrders: seen && state.orders > prev.orders, newMsgs: seen && state.unread > prev.unread } }));
+        window.dispatchEvent(new CustomEvent('kp-store', { detail: { ...state, first: !seen, newOrders: seen && state.orders > prev.orders, newMsgs: seen && state.unread > prev.unread } }));
         seen = true;
       } catch { /* بلا شبكة أو بلا سكيمتا محدّثة: نعاود لاحقاً بصمت */ }
     }
@@ -20,4 +20,4 @@ export function start() {
   };
   tick();
 }
-export function stop() { clearTimeout(timer); timer = null; seen = false; }
+export function stop() { clearTimeout(timer); timer = null; seen = false; Object.assign(state, { on: false, slug: '', orders: 0, unread: 0 }); }

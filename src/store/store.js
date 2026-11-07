@@ -22,12 +22,18 @@ const call = (fn, a = {}, o) => sb.anonRpc(fn, { p_slug: slug, ...a }, o);
 const errMsg = e => e.kp === 'KP_STOCK' ? `الكمية المتوفرة من "${e.detail}" لا تكفي — خفّض الكمية` : e.kp === 'KP_MIN' ? `الحد الأدنى للطلب ${money(+e.detail || 0)}` : (e.message || 'حدث خطأ');
 const saveCart = () => wr('kp_cart_' + slug, S.cart);
 const toast = m => { const t = document.createElement('div'); t.className = 'toast'; t.textContent = m; document.body.append(t); setTimeout(() => t.remove(), 2600); };
-const ic = { search: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>', cart: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 2-1.5L21.6 8H6"/></svg>', chat: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-5.4A8 8 0 1 1 21 12Z"/></svg>', box: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5 9 5 9-5ZM3 8v8l9 5 9-5V8M12 13v8"/></svg>', x: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>', img: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>' };
+const ic = { moon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>', sun: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>', search: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>', cart: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.7 12.4a2 2 0 0 0 2 1.6h8.2a2 2 0 0 0 2-1.5L21.6 8H6"/></svg>', chat: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-5.4A8 8 0 1 1 21 12Z"/></svg>', box: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 8-9-5-9 5 9 5 9-5ZM3 8v8l9 5 9-5V8M12 13v8"/></svg>', x: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>', img: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>' };
 
 // ---- حجم الخط (لهذا الجهاز) ----
 const FS = [90, 100, 115, 130]; let fsI = Math.max(0, FS.indexOf(rd('kp_store_fs', 100)));
 const applyFs = () => { document.documentElement.style.fontSize = (16 * FS[fsI] / 100) + 'px'; };
 applyFs();
+
+// ---- الوضع الليلي/النهاري (يدوي، لهذا المتصفح). الافتراضي: يتبع إعداد الجهاز ----
+const isDark = () => { const t = document.documentElement.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; };
+const syncThemeColor = () => { const m = document.querySelector('meta[name=theme-color]'); if (m) m.setAttribute('content', isDark() ? '#0b1320' : '#0f766e'); };
+const toggleTheme = () => { const t = isDark() ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', t); wr('kp_store_theme', t); syncThemeColor(); const b = document.querySelector('[data-theme-btn]'); if (b) { b.innerHTML = isDark() ? ic.sun : ic.moon; b.setAttribute('aria-label', isDark() ? 'الوضع النهاري' : 'الوضع الليلي'); b.title = isDark() ? 'الوضع النهاري' : 'الوضع الليلي'; } };
+syncThemeColor();
 
 // ---- تشغيل ----
 async function boot() {
@@ -52,7 +58,7 @@ const cartCount = () => Object.keys(S.cart).length, cartTotal = () => Object.ent
 function draw() {
   const i = S.info, wa = i.whatsapp;
   app.innerHTML = `<header class="hd"><div class="logo">${i.logo ? `<img src="${esc(i.logo)}" alt="">` : esc((i.name || 'م')[0])}</div><h1 class="grow">${esc(i.name)}</h1>
-    <button class="ib" data-fs aria-label="حجم الخط"><span>Aa</span></button><button class="ib" data-orders aria-label="طلباتي">${ic.box}</button>
+    <button class="ib" data-theme-btn aria-label="${isDark() ? 'الوضع النهاري' : 'الوضع الليلي'}" title="${isDark() ? 'الوضع النهاري' : 'الوضع الليلي'}">${isDark() ? ic.sun : ic.moon}</button><button class="ib" data-fs aria-label="حجم الخط"><span>Aa</span></button><button class="ib" data-orders aria-label="طلباتي">${ic.box}</button>
     <button class="ib" data-chat aria-label="محادثة المتجر">${ic.chat}<i class="n" id="unread" ${S.unseen ? '' : 'hidden'}>${S.unseen}</i></button></header>
   <div class="wrapx"><section class="hero"><h2>${esc(i.title || i.name)}</h2>${i.about ? `<p>${esc(i.about)}</p>` : ''}
     <div class="chips-i">${i.hours ? `<span class="ci">🕘 ${esc(i.hours)}</span>` : ''}${i.address ? `<span class="ci">📍 ${esc(i.address)}</span>` : ''}${i.phone ? `<a class="ci" href="tel:${esc(i.phone)}">📞 <span class="num">${esc(i.phone)}</span></a>` : ''}${wa ? `<a class="ci" target="_blank" rel="noopener" href="https://wa.me/${esc(wa)}">واتساب</a>` : ''}
@@ -233,6 +239,7 @@ function bindGlobal() {
     const qq = q('[data-q]'); if (qq) { const [id, d] = qq.dataset.q.split(':'); setQty(id, +d); if (q('[data-x]')) closeSheet(); return; }
     const op = q('[data-open]'); if (op) return openProduct(op.dataset.open);
     if (q('[data-more]')) { S.shown += 40; return drawGrid(); }
+    if (q('[data-theme-btn]')) return toggleTheme();
     if (q('[data-cart]')) return openCart();
     if (q('[data-orders]')) return openOrders();
     if (q('[data-chat]')) return openChat();

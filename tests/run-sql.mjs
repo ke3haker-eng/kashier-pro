@@ -23,7 +23,7 @@ const eq = (a, b, m) => { if (JSON.stringify(a) !== JSON.stringify(b)) throw new
 const PSQL = ['-h', D, '-p', String(PORT), '-U', 'postgres', '-d', 'kp', '-X', '-q', '-A', '-t', '-v', 'ON_ERROR_STOP=1'];
 const uid = () => crypto.randomUUID();
 // يشغّل دالة RPC كمستخدم (أو بلا مستخدم) بدور authenticated/anon. الوسائط بأسمائها كما يمرّرها PostgREST: { p_ops: {...} }
-const TYPES = { p_ops: 'jsonb', p_data: 'jsonb', p_since: 'bigint', p_limit: 'integer', p_name: 'text', p_code: 'text', p_user: 'uuid', p_slug: 'text', p_key: 'text', p_ids: 'text[]', p_proof: 'text', p_phone: 'text', p_body: 'text', p_img: 'text', p_after: 'bigint', p_id: 'bigint', p_on: 'boolean', p_status: 'text', p_note: 'text', p_hold: 'text', p_buyer: 'text', p_order: 'uuid' };
+const TYPES = { p_ops: 'jsonb', p_data: 'jsonb', p_since: 'bigint', p_limit: 'integer', p_name: 'text', p_code: 'text', p_user: 'uuid', p_slug: 'text', p_key: 'text', p_ids: 'text[]', p_proof: 'text', p_phone: 'text', p_body: 'text', p_img: 'text', p_after: 'bigint', p_id: 'bigint', p_on: 'boolean', p_status: 'text', p_note: 'text', p_hold: 'text', p_buyer: 'text', p_order: 'uuid', p_days: 'integer' };
 let seqFile = 0;
 function prep(user, fn, args = {}, role = 'authenticated') {
   const claims = user ? JSON.stringify({ sub: user, role }) : '';
@@ -309,6 +309,29 @@ try {
     assert(rs.every(r => r.ok), 'فشل بعضها: ' + JSON.stringify(rs.filter(r => r.err)));
     const nos = rs.map(r => r.ok.no).sort((x, y) => x - y); eq(new Set(nos).size, 10, 'أرقام مكررة'); eq(nos[9] - nos[0], 9, 'أرقام الطلبات متتابعة بلا فجوات');
     return 'السابع مرفوض، و10 طلبات متزامنة بأرقام ' + nos[0] + '–' + nos[9] + ' بلا تكرار';
+  });
+
+  await T('تفريغ المحادثات: إحصاء، حذف الأقدم، حذف الكل للمالك فقط، والطلبات لا تُمسّ', async () => {
+    admin(`update public.kp_orders set proof = '${IMG}' where id = (select id from public.kp_orders where shop_id = (select id from public.kp_shops where slug = 'amal-shop') limit 1)`);
+    const st = rpc(B, 'kp_chat_stats', {}); assert(st.threads >= 1 && st.msgs >= 2 && st.images >= 1 && st.bytes > 0 && st.proofs >= 1 && st.proof_bytes > 0, 'الإحصاء: ' + JSON.stringify(st));
+    eq(rpc(C, 'kp_chat_stats', {}).msgs, 0, 'متجر آخر لا يرى إحصاء غيره');
+    fails(() => rpc(B, 'kp_chat_purge', { p_days: 0 }), /KP_FORBIDDEN/, 'الموظف لا يحذف');
+    fails(() => rpc(null, 'kp_chat_purge', {}, 'anon'), /permission denied/, 'الزائر لا يحذف');
+    const ordersBefore = rpc(A, 'kp_orders_list', {}).length; assert(ordersBefore >= 1, 'طلبات للاختبار');
+    rpc(C, 'kp_chat_purge', { p_days: 0 }); eq(rpc(A, 'kp_chat_stats', {}).msgs, st.msgs, 'حذف مالك متجر آخر لا يمسّ هذا المتجر');
+    const K7 = 'k7_' + 'w'.repeat(30); anon('kp_store_chat_send', { p_slug: 'amal-shop', p_key: K7, p_name: 'قديم', p_phone: '', p_body: 'رسالة قديمة جداً' });
+    admin(`update public.kp_msgs set created_at = now() - interval '45 days' where body = 'رسالة قديمة جداً'`);
+    const s2 = rpc(A, 'kp_chat_stats', {}); eq([s2.older30, s2.threads, s2.msgs], [1, st.threads + 1, st.msgs + 1], 'إحصاء قبل حذف الأقدم');
+    const r1 = rpc(A, 'kp_chat_purge', { p_days: 30 }); eq([r1.msgs, r1.threads], [1, 1], 'حذف الأقدم من 30 يوماً: رسالة واحدة ومحادثتها الفارغة'); assert(r1.bytes > 0);
+    const s3 = rpc(A, 'kp_chat_stats', {}); eq([s3.threads, s3.msgs, s3.older30], [st.threads, st.msgs, 0], 'غير الأقدم بقي كما هو');
+    const r2 = rpc(A, 'kp_chat_purge', { p_days: 0 }); eq([r2.msgs, r2.threads], [st.msgs, st.threads], 'حذف الكل'); assert(r2.bytes >= st.bytes);
+    const s4 = rpc(A, 'kp_chat_stats', {}); eq([s4.threads, s4.msgs, s4.images, s4.bytes], [0, 0, 0, 0], 'لا شيء بعد التفريغ');
+    eq(rpc(A, 'kp_orders_list', {}).length, ordersBefore, 'الطلبات لم تُمسّ'); eq([s4.proofs, s4.proof_bytes], [st.proofs, st.proof_bytes], 'إشعارات الدفع لم تُمسّ');
+    eq(rpc(A, 'kp_store_status', {}).unread, 0, 'العدّاد صفر');
+    anon('kp_store_chat_send', { p_slug: 'amal-shop', p_key: K3, p_name: 'سارة', p_phone: '', p_body: 'بعد التفريغ' });
+    eq(anon('kp_store_chat_get', { p_slug: 'amal-shop', p_key: K3, p_after: 0 }).msgs.map(m => m.body), ['بعد التفريغ'], 'المشتري يبدأ محادثة جديدة بعد التفريغ');
+    eq(rpc(A, 'kp_threads_list', {}).length, 1, 'محادثة جديدة واحدة');
+    return `أُفرغت ${st.msgs} رسالة (${st.bytes} بايت) في ${st.threads} محادثة، والطلبات وإشعارات الدفع سليمة`;
   });
 
   await T('الأمان: anon لا يصل لدوال الموظفين ولا للجداول، والمستخدم غير العضو مرفوض', async () => {

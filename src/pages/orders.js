@@ -21,12 +21,13 @@ const fresh = () => ({ tab: 'orders', filter: 'open', orders: [], threads: [], b
 
 export default {
   css: `.bub{max-width:82%;border-radius:1rem;padding:.4rem .7rem;white-space:pre-wrap;word-break:break-word}.bub.me{align-self:flex-start;background:var(--p);color:#fff}.bub.him{align-self:flex-end;background:var(--in)}.bub.sys{align-self:center;color:var(--t2);font-size:.78rem;border:1px dashed var(--b);text-align:center}.bub img{max-width:100%;border-radius:.6rem;display:block;margin:.2rem 0}.bub time{display:block;font-size:.66rem;opacity:.7}.chatbox{display:flex;flex-direction:column;gap:.4rem;height:min(60dvh,34rem);overflow:auto;padding:.3rem}.thr{display:flex;gap:.6rem;align-items:center;padding:.65rem .2rem;border-bottom:1px solid var(--b);cursor:pointer}.thr:last-child{border:0}.thr .av{width:2.4rem;height:2.4rem;border-radius:50%;background:var(--pb);color:var(--p);display:flex;align-items:center;justify-content:center;font-weight:800;flex:none}`,
-  async render(view) {
+  async render(view, ctx) {
     root = view; st ||= fresh();
+    const want = ctx?.params?.get?.('tab'); if ((want === 'chat' || want === 'orders') && want !== st.seenParam) { st.seenParam = want; st.tab = want; st.buyer = null; }
     if (!db.isRemote()) { view.innerHTML = html`${pageHead('الطلبات والمحادثات')}<div class="card">${emptyState('chat', 'هذه الصفحة تعمل مع المتجر الإلكتروني، وهو يحتاج الوضع السحابي (Supabase).', html`<a class="btn primary" href="#/settings">اربط Supabase من الإعدادات</a>`)}</div>`.toString(); return; }
     bind(view); await load(true); draw(); poll();
   },
-  destroy() { clearTimeout(timer); root = null; token++; },
+  destroy() { clearTimeout(timer); root = null; token++; if (st) st.seenParam = ''; },
 };
 
 async function load(first) {

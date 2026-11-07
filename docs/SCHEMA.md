@@ -100,4 +100,4 @@ data/
 إعدادات المتجر النصية (العنوان، واتساب، رسوم التوصيل…) تُحفظ في الإعدادات العادية `settings.store` وتتزامن كأي إعداد، وتقرأ الدالة العامة `kp_store_info` قائمة بيضاء منها فقط.
 
 دوال الزائر (دور `anon`): `kp_store_info`, `kp_store_products`, `kp_store_images`, `kp_store_order`, `kp_store_orders`, `kp_store_order_proof`, `kp_store_chat_send`, `kp_store_chat_get`, `kp_store_msg_img`.
-دوال الموظفين (أي عضو): `kp_store_status`, `kp_orders_list`, `kp_order_proof`, `kp_order_set`, `kp_order_link`, `kp_threads_list`, `kp_chat_staff_get`, `kp_chat_staff_send`, `kp_chat_staff_img`. وللمالك فقط: `kp_store_publish`.
+دوال الموظفين (أي عضو): `kp_store_status`, `kp_orders_list`, `kp_order_proof`, `kp_order_set`, `kp_order_link`, `kp_threads_list`, `kp_chat_staff_get`, `kp_chat_staff_send`, `kp_chat_staff_img`. وللمالك فقط: `kp_store_publish`، و`kp_chat_purge(p_days)` (حذف رسائل المحادثات: كلها إن كان 0، أو الأقدم من هذا العدد من الأيام، ثم المحادثات الفارغة؛ لا يمسّ الطلبات). ولأي عضو: `kp_chat_stats` (عدد المحادثات والرسائل والصور وحجمها التقريبي وحجم إشعارات الدفع).

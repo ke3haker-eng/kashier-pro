@@ -776,13 +776,48 @@ begin
 end;
 $$;
 
+-- ---------- إدارة مساحة المحادثات (تفريغ يدوي) ----------
+-- الإحصاء لأي عضو. الحذف للمالك فقط: يحذف رسائل المحادثات (ونصوصها وصورها) ثم المحادثات الفارغة. لا يمسّ الطلبات ولا إشعارات الدفع.
+-- p_days = 0 (أو فارغ) يحذف الكل، وأي رقم موجب يحذف الرسائل الأقدم من هذا العدد من الأيام فقط.
+create or replace function public.kp_chat_stats() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare c record;
+begin
+  select * into c from public.kp_ctx();
+  return jsonb_build_object(
+    'threads', (select count(*) from public.kp_threads where shop_id = c.v_shop),
+    'msgs', (select count(*) from public.kp_msgs where shop_id = c.v_shop),
+    'images', (select count(*) from public.kp_msgs where shop_id = c.v_shop and img is not null),
+    'bytes', (select coalesce(sum(octet_length(body) + coalesce(octet_length(img), 0)), 0) from public.kp_msgs where shop_id = c.v_shop),
+    'older30', (select count(*) from public.kp_msgs where shop_id = c.v_shop and created_at < now() - interval '30 days'),
+    'proofs', (select count(*) from public.kp_orders where shop_id = c.v_shop and proof is not null),
+    'proof_bytes', (select coalesce(sum(octet_length(proof)), 0) from public.kp_orders where shop_id = c.v_shop and proof is not null));
+end;
+$$;
+
+create or replace function public.kp_chat_purge(p_days integer default 0) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare c record; d integer := greatest(coalesce(p_days, 0), 0); m integer; t integer; b bigint;
+begin
+  select * into c from public.kp_ctx();
+  if c.v_role <> 'owner' then raise exception 'KP_FORBIDDEN'; end if;
+  select coalesce(sum(octet_length(body) + coalesce(octet_length(img), 0)), 0) into b from public.kp_msgs
+    where shop_id = c.v_shop and (d = 0 or created_at < now() - make_interval(days => d));
+  delete from public.kp_msgs where shop_id = c.v_shop and (d = 0 or created_at < now() - make_interval(days => d));
+  get diagnostics m = row_count;
+  delete from public.kp_threads th where th.shop_id = c.v_shop and (d = 0 or not exists (select 1 from public.kp_msgs g where g.shop_id = th.shop_id and g.buyer = th.buyer));
+  get diagnostics t = row_count;
+  return jsonb_build_object('msgs', m, 'threads', t, 'bytes', b);
+end;
+$$;
+
 -- ---------- الصلاحيات: المستخدمون المسجّلون فقط ----------
 do $$
 declare f text;
 begin
   for f in select p.oid::regprocedure::text from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname in ('kp_me','kp_create_shop','kp_join_shop','kp_rotate_join_code','kp_remove_member','kp_changes','kp_commit','kp_replace_all',
-                                          'kp_store_publish','kp_store_status','kp_orders_list','kp_order_proof','kp_order_set','kp_order_link','kp_threads_list','kp_chat_staff_get','kp_chat_staff_send','kp_chat_staff_img')
+                                          'kp_store_publish','kp_store_status','kp_orders_list','kp_order_proof','kp_order_set','kp_order_link','kp_threads_list','kp_chat_staff_get','kp_chat_staff_send','kp_chat_staff_img','kp_chat_stats','kp_chat_purge')
   loop
     execute format('revoke all on function %s from public, anon', f);
     execute format('grant execute on function %s to authenticated', f);

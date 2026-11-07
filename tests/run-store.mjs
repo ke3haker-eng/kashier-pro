@@ -130,6 +130,69 @@ try {
     return 'نص ذهاباً وإياباً + صورة من المشتري للبائع';
   });
 
+  await T('S12', 'المشتري: زر الوضع الليلي/النهاري يبدّل يدوياً، ويُحفظ بعد إعادة التحميل، ويغيّر الألوان فعلاً', async () => {
+    await S.goto(STORE); await S.waitFor(`document.querySelector('[data-theme-btn]')`, 15000);
+    const bg = () => S.eval(`getComputedStyle(document.body).backgroundColor`), th = () => S.eval(`document.documentElement.getAttribute('data-theme')`);
+    const light = await bg(), lbl0 = await S.eval(`document.querySelector('[data-theme-btn]').getAttribute('aria-label')`); eq(await th(), null, 'الافتراضي يتبع الجهاز');
+    await S.click('[data-theme-btn]'); eq(await th(), 'dark'); const dark = await bg(); assert(dark !== light, 'الخلفية يجب أن تتغيّر'); const lbl1 = await S.eval(`document.querySelector('[data-theme-btn]').getAttribute('aria-label')`); assert(lbl0 !== lbl1, 'تسمية الزر تتبدّل');
+    await S.shot(path.join(SHOTS, 'store-buyer-dark.png'));
+    await S.goto(STORE); await S.waitFor(`document.querySelector('[data-theme-btn]')`, 15000); eq(await th(), 'dark', 'يُحفظ بعد إعادة التحميل'); eq(await bg(), dark, 'نفس الخلفية الليلية بعد التحميل');
+    await S.click('[data-theme-btn]'); eq(await th(), 'light'); eq(await bg(), light, 'عودة للنهاري');
+    await S.goto(STORE); await S.waitFor(`document.querySelector('[data-theme-btn]')`, 15000); eq(await th(), 'light', 'اختيار النهاري يُحفظ أيضاً');
+    await S.eval(`localStorage.removeItem('kp_store_theme')`); return 'تبديل يدوي ليلي ↔ نهاري، محفوظ بعد التحميل، وألوان مختلفة فعلاً';
+  });
+
+  await T('S13', 'البائع: الطلب الجديد والرسائل غير المقروءة تظهر في عدّاد الجرس وقائمته، وعلى بطاقة «الطلبات» داخل «المزيد»، وفي شريط الرئيسية', async () => {
+    const buyer = q1(`select buyer from kp_threads where shop_id='${shop}' limit 1`);
+    q1(`insert into kp_orders(shop_id,no,buyer,name,phone,delivery,pay,items,subtotal,fee,total) values ('${shop}',99,'${buyer}','عميل التنبيه','0551230000','pickup','cash','[]'::jsonb,10,0,10)`);
+    q1(`update kp_threads set unread_shop=3 where shop_id='${shop}'`);
+    await A.waitFor(`(()=>{const b=document.getElementById('bellcnt');return b&&!b.hidden&&+b.textContent>=4})()`, 25000);
+    await A.eval(`document.querySelector('[data-bell]').click()`); await A.waitFor(`document.querySelector('.popover')`);
+    const pt = await A.eval(`document.querySelector('.popover').innerText`); assert(/1 طلب جديد من المتجر الإلكتروني/.test(pt) && /3 رسالة غير مقروءة/.test(pt), 'قائمة الجرس: ' + pt);
+    assert(await A.eval(`!!document.querySelector('.popover a[href="#/orders"]')&&!!document.querySelector('.popover a[href="#/orders?tab=chat"]')`), 'روابط الجرس'); await A.eval(`document.querySelector('.popover').remove()`);
+    try {
+    await A.viewport(412, 860, true); await sleep(400);
+    await A.eval(`document.querySelector('[data-more]').click()`); await A.waitFor(`document.querySelector('.ov [data-cnt=orders]')`, 8000);
+    assert(await A.eval(`(()=>{const e=document.querySelector('.ov [data-cnt=orders]');return !e.hidden&&+e.textContent===4})()`), 'شارة بطاقة الطلبات داخل المزيد = 4');
+    assert(await A.eval(`(()=>{const e=document.querySelector('[data-cnt=orders-more]');return e&&!e.hidden&&+e.textContent===4})()`), 'شارة زر المزيد');
+    await A.shot(path.join(SHOTS, 'store-admin-more-badge.png')); await A.click('.ov [data-close]');
+    await A.eval(`location.hash='#/'`); await A.waitFor(`document.querySelector('#storeBanner a')`, 8000); const bt = await A.eval(`document.querySelector('#storeBanner').innerText`);
+    assert(/1 طلب جديد/.test(bt) && /3 رسالة غير مقروءة/.test(bt), 'شريط الرئيسية: ' + bt); await A.shot(path.join(SHOTS, 'store-admin-home-banner.png'));
+    await A.eval(`location.hash='#/orders?tab=chat'`); await A.waitFor(`document.querySelector('[data-t]')`, 10000);
+    } finally { await A.viewport(1366, 800, false); }
+    q1(`delete from kp_orders where shop_id='${shop}' and no=99`); q1(`update kp_threads set unread_shop=0 where shop_id='${shop}'`);
+    await A.waitFor(`(()=>{const b=[...document.querySelectorAll('[data-cnt=orders]')];return b.length&&b.every(e=>e.hidden)})()`, 25000);
+    return 'جرس (4) + قائمة + بطاقة المزيد + شريط الرئيسية + رابط الرسائل يفتح تبويب المحادثات، وتختفي الشارات عند المعالجة';
+  });
+
+  await T('S14', 'الباركود: يظهر مع الرابط ويُنزَّل PNG/SVG ويُفكّ إلى الرابط نفسه، ثابت للرابط ويتغيّر بتغيّره؛ وتفريغ المحادثات للمالك بتأكيد ولا يمسّ الطلبات', async () => {
+    await A.eval(`location.hash='#/settings?tab=shop'`); await A.waitFor(`document.querySelector('[data-qr-png]')`, 15000);
+    const link = await A.eval(`document.querySelector('[data-qr-png]').dataset.qrPng`); assert(link.includes('store.html?s=' + SHOP), 'رابط الباركود: ' + link);
+    const path0 = () => A.eval(`document.querySelector('[data-qr-png]').closest('.card').querySelector('svg[role=img] path').getAttribute('d')`); const d0 = await path0(); assert(d0.length > 200, 'مسار الباركود');
+    await A.eval(`window.__dl=[];const oc=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download){const n=this.download;fetch(this.href).then(r=>r.blob()).then(b=>new Promise(ok=>{const f=new FileReader();f.onload=()=>ok({name:n,type:b.type,size:b.size,url:f.result});f.readAsDataURL(b)})).then(x=>window.__dl.push(x));return}return oc.call(this)}`);
+    await A.click('[data-qr-png]'); await A.waitFor(`window.__dl.length>=1`, 10000); await A.click('[data-qr-svg]'); await A.waitFor(`window.__dl.length>=2`, 10000);
+    const dl = await A.eval(`window.__dl`); eq([dl[0].name, dl[0].type, dl[1].name, dl[1].type], ['qr-' + SHOP + '.png', 'image/png', 'qr-' + SHOP + '.svg', 'image/svg+xml'], 'التنزيلان'); assert(dl[0].size > 1500 && /^data:image\/png;base64,iVBORw0KGgo/.test(dl[0].url), 'ملف PNG صالح');
+    const svgTxt = Buffer.from(dl[1].url.split(',')[1], 'base64').toString(); assert(/^<svg/.test(svgTxt) && svgTxt.includes('<path d="M'), 'ملف SVG صالح');
+    const f = path.join(ROOT, 'qr-dl.png'); fs.writeFileSync(f, Buffer.from(dl[0].url.split(',')[1], 'base64')); let dec = '';
+    try { dec = execFileSync('python3', ['-I', '-c', 'import sys,cv2\nimg=cv2.imread(sys.argv[1],cv2.IMREAD_GRAYSCALE)\nprint(cv2.QRCodeDetector().detectAndDecode(img)[0])', f], { encoding: 'utf8' }).trim(); } catch { dec = null; }
+    if (dec !== null) eq(dec, link, 'فكّ ملف PNG المُنزَّل بقارئ مستقل يعيد رابط المتجر'); const decoded = dec !== null;
+    await A.eval(`location.hash='#/'`); await sleep(300); await A.eval(`location.hash='#/settings?tab=shop'`); await A.waitFor(`document.querySelector('[data-qr-png]')`, 10000); eq(await path0(), d0, 'ثابت بعد إعادة الفتح');
+    await A.fill('#shop_slug', 'amal-shop-2'); await A.click('[data-shop-pub="1"]'); await A.waitFor(`document.querySelector('[data-qr-png]')?.dataset.qrPng.includes('amal-shop-2')`, 10000); assert(await path0() !== d0, 'يتغيّر مع الرابط');
+    await A.fill('#shop_slug', SHOP); await A.click('[data-shop-pub="1"]'); await A.waitFor(`document.querySelector('[data-qr-png]')?.dataset.qrPng.includes('s=${SHOP}&')`, 10000); eq(await path0(), d0, 'يعود كما كان عند عودة الرابط');
+    await A.eval(`document.querySelector('[data-qr-png]').closest('.card').scrollIntoView({block:'center'})`); await A.shot(path.join(SHOTS, 'store-admin-qr.png'));
+    try { await A.viewport(412, 860, true); await sleep(300); await A.eval(`document.querySelector('[data-qr-png]').closest('.card').scrollIntoView({block:'center'})`); await sleep(200); await A.shot(path.join(SHOTS, 'store-admin-qr-mobile.png')); eq(await A.eval(`document.documentElement.scrollWidth<=innerWidth+1`), true, 'لا تمرير أفقي في بطاقة الباركود على الجوال'); } finally { await A.viewport(1366, 800, false); }
+    // ---- تفريغ المحادثات ----
+    await A.waitFor(`document.querySelector('[data-chat-purge="0"]')`, 8000); const msgs0 = num(`select count(*) from kp_msgs where shop_id='${shop}'`), ord0 = num(`select count(*) from kp_orders where shop_id='${shop}'`); assert(msgs0 > 0, 'رسائل للاختبار');
+    assert(await A.eval(`document.querySelector('[data-chat-purge="30"]').disabled`) && !(await A.eval(`document.querySelector('[data-chat-purge="0"]').disabled`)), 'زر الأقدم معطّل (لا قديم) وزر الكل مفعّل');
+    assert(/vacuum full public\.kp_msgs;/.test(await A.eval(`document.body.innerText`)), 'أمر VACUUM ظاهر');
+    await A.click('[data-chat-purge="0"]'); await A.waitFor(`document.querySelector('.ov [data-ok]')`); assert(/نهائياً/.test(await A.eval(`document.querySelector('.ov').innerText`)), 'نص التأكيد'); await A.click('.ov [data-close]'); await sleep(400);
+    eq(num(`select count(*) from kp_msgs where shop_id='${shop}'`), msgs0, 'الإلغاء لا يحذف');
+    await A.click('[data-chat-purge="0"]'); await A.waitFor(`document.querySelector('.ov [data-ok]')`); await A.click('.ov [data-ok]');
+    await A.waitFor(`document.querySelector('[data-chat-purge="0"]')?.disabled===true`, 10000);
+    eq([num(`select count(*) from kp_msgs where shop_id='${shop}'`), num(`select count(*) from kp_threads where shop_id='${shop}'`), num(`select count(*) from kp_orders where shop_id='${shop}'`)], [0, 0, ord0], 'بعد التفريغ: لا رسائل ولا محادثات، والطلبات كما هي');
+    await A.shot(path.join(SHOTS, 'store-admin-qr-purge.png')); return `باركود ثابت ${decoded ? 'ومفكوك بقارئ مستقل' : '(فكّ القارئ المستقل مُتخطّى: OpenCV غير متوفر)'} + تنزيل PNG وSVG، وتفريغ ${msgs0} رسالة والطلبات سليمة`;
+  });
+
   await T('S9', 'إخفاء منتج يزيله من المتجر فوراً، وإيقاف المتجر يعرض للزائر «غير متاح»', async () => {
     await A.eval(`K.ops.saveProduct({online:false},'${ids.cheese}')`); await sleep(500);
     await S.goto(STORE); await S.waitFor(`document.querySelector('.pc')`); const t = await S.eval(`document.body.innerText`); assert(!/جبنة شيدر/.test(t) && /حليب المراعي/.test(t), 'جبنة يجب أن تختفي');
